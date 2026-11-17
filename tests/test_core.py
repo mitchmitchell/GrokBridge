@@ -212,3 +212,21 @@ def test_oversized_and_bad_requests_are_rejected(env):
                 "items": [MARK] * 201}
     assert bridge.handle_event("GROK-1", groklink_event(too_many)) == []
     assert bridge.counters["groklink_rejected"] == 2
+
+
+@pytest.mark.parametrize("url,ok", [
+    ("https://example.com/hook", True),
+    ("http://127.0.0.1:8765/takbridge", True),
+    ("http://grokbot.snowy-pangolin.ts.net:8080/x", True),
+    ("http://100.75.230.48:8080/x", True),
+    ("http://192.168.30.94/x", True),
+    ("http://example.com/hook", False),
+    ("http://8.8.8.8/hook", False),
+    ("ftp://example.com/x", False),
+])
+def test_webhook_url_must_be_https_off_the_tailnet(url, ok):
+    if ok:
+        assert make_config(webhook=url).bots["GROK-1"].webhook_url == url
+    else:
+        with pytest.raises(ValueError):
+            make_config(webhook=url)

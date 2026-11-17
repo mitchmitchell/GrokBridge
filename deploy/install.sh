@@ -27,7 +27,9 @@ set -euo pipefail
 # Fill these in before running.
 BOT_CALLSIGN="GROK-1"
 BOT_SSH_KEY=""          # GROK-1's public key, one line: ssh-ed25519 AAAA... comment
-BOT_WEBHOOK_URL=""      # e.g. http://grokbot-host.snowy-pangolin.ts.net:8080/takbridge
+BOT_WEBHOOK_URL=""      # the bot's wake-up URL. Must be https:// on the internet;
+                        # plain http:// is accepted only for tailnet or local addresses.
+                        # Each call carries the message text and the sender's position.
 BOT_CERT="/home/claude/certs/GROK-1.crt.pem"
 BOT_KEY="/home/claude/certs/GROK-1.key"
 CA_CHAIN="/home/claude/certs/magnolia-ca-chain.pem"

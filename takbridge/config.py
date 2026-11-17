@@ -88,6 +88,21 @@ def _bot_uid(callsign: str) -> str:
     return "takbridge-" + re.sub(r"[^A-Za-z0-9_.\-]", "_", callsign)
 
 
+def _private_host(url: str) -> bool:
+    """True for localhost, private and Tailscale (100.64.0.0/10) addresses and
+    *.ts.net names: places where plain http stays off the internet."""
+    import ipaddress
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    if host == "localhost" or host.endswith(".ts.net"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private or ip in ipaddress.ip_network("100.64.0.0/10")
+
+
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -157,6 +172,10 @@ def parse(cp: configparser.ConfigParser) -> Config:
         url = s.get("webhook_url", "").strip()
         if not url.startswith(("http://", "https://")):
             raise ValueError(f"config: [{section}] webhook_url must be http(s)")
+        if url.startswith("http://") and not _private_host(url):
+            raise ValueError(
+                f"config: [{section}] webhook_url must use https:// for an internet "
+                "address; plain http:// is allowed only on the tailnet or this machine")
         tls = {k: s[k] for k in TLS_KEYS if k in s}
         cfg.bots[callsign] = Bot(
             callsign=callsign,
