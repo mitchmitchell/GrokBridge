@@ -44,10 +44,10 @@ BOT_SSH_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDl1mI3nTnBIW4b1EtGUoKNq4RdILTM
 # plus the bridge's own X-TakBridge-Signature, to the URL, which must be
 # https://. Each call carries the message text and the sender's position.
 WEBHOOK_ENV="/etc/grok-bridge/webhook.env"
-URL_VAR="WEBHOOK_URL"           # names of the KEY=VALUE lines in WEBHOOK_ENV;
-HEADER_VAR="WEBHOOK_HEADER"     # change these to match the file
-SCHEME_VAR="WEBHOOK_SCHEME"
-KEY_VAR="WEBHOOK_KEY"
+URL_VAR="GROK1_WEBHOOK_URL"         # names of the KEY=VALUE lines in WEBHOOK_ENV;
+HEADER_VAR="GROK1_WEBHOOK_AUTH_HEADER"    # change these to match the file
+SCHEME_VAR="GROK1_WEBHOOK_AUTH_SCHEME"
+KEY_VAR="GROK1_WEBHOOK_KEY"
 BOT_CERT="/home/claude/certs/GROK-1.crt.pem"
 BOT_KEY="/home/claude/certs/GROK-1.key"
 CA_CHAIN="/home/claude/certs/magnolia-ca-chain.pem"
@@ -56,7 +56,7 @@ BOT_LAT="35.0"          # where the bot appears on the map
 BOT_LON="-90.0"
 ADMINS="claude"         # users who may run 'tak --bot NAME' locally
 REPO="https://github.com/mitchmitchell/GrokBridge.git"
-REF="main"              # pin to a commit for production, e.g. 908b430
+REF="3552b5a"           # code version installed (GrokBridge commit)
 # ------------------------------------------------------------------------
 
 die() { echo "install: $*" >&2; exit 1; }
