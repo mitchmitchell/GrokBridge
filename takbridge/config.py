@@ -12,7 +12,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-CALLSIGN_RE = re.compile(r"^[A-Za-z0-9 _.\-]{1,40}$")
+# Real ATAK callsigns include "/" (e.g. AE5HO/TAK, captured 2026-11-17).
+CALLSIGN_RE = re.compile(r"^[A-Za-z0-9 _.\-/]{1,40}$")
 
 # PyTAK TLS settings a bot section may carry (names from pytak.constants).
 TLS_KEYS = (

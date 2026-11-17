@@ -64,11 +64,13 @@ async def serve(path: str, handle: Callable[[str, str, dict], dict],
     async def on_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         try:
             uid = peer_uid(writer)
+            # Read the request before answering, even to refuse it, so the
+            # caller never meets a closed socket mid-send.
+            line = await asyncio.wait_for(reader.readline(), timeout=10)
             if not allowed(uid):
                 log.warning("control: refused caller uid=%s", uid)
                 reply = {"ok": False, "error": "not allowed"}
             else:
-                line = await asyncio.wait_for(reader.readline(), timeout=10)
                 if len(line) > MAX_REQUEST:
                     reply = {"ok": False, "error": "request too large"}
                 else:

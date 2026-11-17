@@ -206,7 +206,7 @@ def classify(ev: Event, bot_uid: str):
         return DirectChat(
             message_id=chat.get("messageId") or ev.uid,
             from_uid=frm or "",
-            from_callsign=chat.get("senderCallsign"),
+            from_callsign=(chat.get("senderCallsign") or "").strip() or None,
             to_uid=bot_uid,
             text=(remarks.text or ""),
             time=parse_time(remarks.get("time")) or ev.time,
@@ -216,7 +216,9 @@ def classify(ev: Event, bot_uid: str):
     if ev.type.startswith("a-") and ev.lat is not None and ev.lon is not None:
         return Position(
             uid=ev.uid,
-            callsign=contact.get("callsign") if contact is not None else None,
+            # ATAK can send trailing spaces ("AE5HO/TAK "); store it trimmed.
+            callsign=(contact.get("callsign") or "").strip() or None
+            if contact is not None else None,
             lat=ev.lat,
             lon=ev.lon,
             time=ev.time,
