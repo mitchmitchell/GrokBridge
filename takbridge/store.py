@@ -107,7 +107,7 @@ class Store:
         """Columns added after the first live database was created."""
         have = {r["name"] for r in self.db.execute("PRAGMA table_info(contacts)")}
         for col, decl in (("speed_mps", "REAL"), ("course_deg", "REAL"),
-                          ("disconnected_at", "REAL")):
+                          ("disconnected_at", "REAL"), ("pos_seen", "REAL")):
             if col not in have:
                 self.db.execute(f"ALTER TABLE contacts ADD COLUMN {col} {decl}")
 
@@ -157,10 +157,14 @@ class Store:
     def see_contact(self, uid: str, callsign: str | None, lat: float | None,
                     lon: float | None, time: str | None, speed_mps: float | None = None,
                     course_deg: float | None = None) -> None:
-        """Record a sighting. Any sighting means the contact is connected."""
+        """Record a sighting. Any sighting means the contact is connected;
+        only a sighting with a position moves pos_seen, which is what a
+        position's age is measured from (a chat message is not a fix)."""
+        now = self.clock()
+        pos_seen = now if lat is not None and lon is not None else None
         self.db.execute(
             "INSERT INTO contacts (uid, callsign, lat, lon, time, last_seen, speed_mps,"
-            " course_deg, disconnected_at) VALUES (?,?,?,?,?,?,?,?,NULL)"
+            " course_deg, disconnected_at, pos_seen) VALUES (?,?,?,?,?,?,?,?,NULL,?)"
             " ON CONFLICT(uid) DO UPDATE SET"
             " callsign=COALESCE(excluded.callsign, contacts.callsign),"
             " lat=COALESCE(excluded.lat, contacts.lat),"
@@ -168,8 +172,9 @@ class Store:
             " time=COALESCE(excluded.time, contacts.time),"
             " speed_mps=COALESCE(excluded.speed_mps, contacts.speed_mps),"
             " course_deg=COALESCE(excluded.course_deg, contacts.course_deg),"
+            " pos_seen=COALESCE(excluded.pos_seen, contacts.pos_seen),"
             " last_seen=excluded.last_seen, disconnected_at=NULL",
-            (uid, callsign, lat, lon, time, self.clock(), speed_mps, course_deg))
+            (uid, callsign, lat, lon, time, now, speed_mps, course_deg, pos_seen))
 
     def mark_disconnected(self, uid: str) -> None:
         self.db.execute("UPDATE contacts SET disconnected_at=? WHERE uid=?",

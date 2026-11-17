@@ -159,6 +159,9 @@ class Bridge:
         pos = self.store.contact_by_uid(from_uid) if from_uid else None
         if pos and pos.get("lat") is not None:
             body["sender_position"] = self._position(pos)
+            # Seconds since the bridge last heard from that device, so a bot
+            # can say "2 minutes ago" without converting time zones.
+            body["sender_position"]["age_s"] = self._pos_age(pos)
         if data is not None:
             if isinstance(data.get("summary"), dict):
                 body["summary"] = data["summary"]
@@ -183,6 +186,12 @@ class Bridge:
             return {"ok": False, "error": str(exc)}
 
     # --- helpers
+
+    def _pos_age(self, c: dict) -> int:
+        """Seconds since the position itself was reported (not since the
+        device was last heard from, e.g. by chat)."""
+        seen = c.get("pos_seen") or c["last_seen"]
+        return max(0, int(self.clock() - seen))
 
     @staticmethod
     def _position(c: dict) -> dict:
@@ -271,7 +280,7 @@ class Bridge:
         c = self.store.contact_by_callsign(cs)
         if c is None or c.get("lat") is None:
             raise ToolError(f"no position known for {cs}")
-        age = max(0, int(self.clock() - c["last_seen"]))
+        age = self._pos_age(c)
         return {"callsign": cs, **self._position(c), "age_s": age,
                 "stale": age > self.cfg.limits.stale_after_s,
                 "online": c.get("disconnected_at") is None}

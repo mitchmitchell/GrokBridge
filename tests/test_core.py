@@ -243,3 +243,18 @@ def test_webhook_headers_from_config():
                 "webhook_header_X-Signature = \n"):
         with pytest.raises(ValueError):
             config.loads(base + bad)
+
+
+def test_webhook_sender_position_has_age(env):
+    bridge, store, clock, sent = env
+    clock.t += 42  # the position was seen 42 s before the chat
+    body = bridge.handle_event("GROK-1", fixture("direct_chat.xml"))[0]
+    assert body["sender_position"]["age_s"] == 42
+
+
+def test_chat_does_not_make_an_old_position_look_fresh(env):
+    bridge, store, clock, sent = env
+    clock.t += 600
+    bridge.handle_event("GROK-1", fixture("direct_chat.xml"))  # MITCH chats; no new fix
+    w = bridge.call("GROK-1", "where", {"callsign": "MITCH"})
+    assert w["age_s"] == 600 and w["online"] is True

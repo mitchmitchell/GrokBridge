@@ -16,8 +16,8 @@ The bridge POSTs JSON to your automation. Fields:
 | `from_callsign` | who sent it, e.g. `AE5HO/TAK-TABLET`; **reply to this** |
 | `from_uid` | the sender's device id |
 | `text` | what they wrote |
-| `time` | when they sent it, ISO 8601 UTC |
-| `sender_position` | optional: `lat`, `lon`, `time`, `speed_mps`, `course_deg` (true degrees) |
+| `time` | when they sent it, ISO 8601 **UTC** (the users are in US Central, America/Chicago) |
+| `sender_position` | optional: `lat`, `lon`, `time` (UTC), `age_s` (seconds since that position was reported), `speed_mps`, `course_deg` (true degrees, direction of travel, not where the device faces) |
 | `data`, `summary` | only for `kind: request` |
 
 Headers: `Authorization: Bearer …` (your automation's key) and

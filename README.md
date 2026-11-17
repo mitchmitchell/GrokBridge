@@ -67,7 +67,7 @@ On each new direct message the bridge POSTs JSON to the bot's webhook:
  "from_callsign": "AE5HO/TAK-TABLET", "from_uid": "ANDROID-...",
  "text": "Mark the trailhead 500 m north of me.", "time": "2026-11-17T18:31:47Z",
  "sender_position": {"lat": 35.0, "lon": -90.0, "time": "2026-11-17T18:31:30Z",
-                     "speed_mps": 0.0, "course_deg": 305.1}}
+                     "age_s": 17, "speed_mps": 0.0, "course_deg": 305.1}}
 ```
 
 `kind` is `chat` for ATAK chat and `request` for the GrokLink example
@@ -136,6 +136,15 @@ another bot's inbox, map items or snapshots.
 What a bot sends goes only to the named person: replies and markers carry a
 `<marti><dest callsign=…/>` element, so the server delivers them to that
 user alone (checked: they did not reach other devices in the group).
+
+## Updating
+
+After reviewing a new GrokBridge commit, as root:
+
+    sudo bash /opt/takbridge/src/deploy/update.sh <commit>
+
+It reinstalls the code at that commit and restarts the service; the
+configuration, certificates, database and SSH gate stay as they are.
 
 ## Running and stopping
 

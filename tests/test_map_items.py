@@ -139,4 +139,4 @@ def test_store_migrates_an_old_contacts_table(tmp_path):
     con.close()
     s = Store(str(db))
     cols = {r["name"] for r in s.db.execute("PRAGMA table_info(contacts)")}
-    assert {"speed_mps", "course_deg", "disconnected_at"} <= cols
+    assert {"speed_mps", "course_deg", "disconnected_at", "pos_seen"} <= cols
