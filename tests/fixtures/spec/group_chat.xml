@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<event version='2.0' uid='GeoChat.ANDROID-abc123.All Chat Rooms.77aa' type='b-t-f' time='2026-11-16T21:01:00.000Z' start='2026-11-16T21:01:00.000Z' stale='2026-11-17T21:01:00.000Z' how='h-g-i-g-o'>
+<point lat='35.0' lon='-90.0' hae='9999999.0' ce='9999999.0' le='9999999.0'/>
+<detail>
+<__chat id='All Chat Rooms' chatroom='All Chat Rooms' senderCallsign='MITCH'>
+<chatgrp id='All Chat Rooms' uid0='ANDROID-abc123' uid1='All Chat Rooms'/>
+</__chat>
+<link relation='p-p' uid='ANDROID-abc123' type='a-f-G-U-C'/>
+<remarks time='2026-11-16T21:01:00.000Z' source='BAO.F.ATAK.ANDROID-abc123'>Radio check</remarks>
+</detail>
+</event>

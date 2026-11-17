@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "takbridge"
+version = "0.1.0"
+description = "Lets AI bots take part in a TAK network as chat contacts."
+requires-python = ">=3.10"
+# Runtime dependencies: PyTAK, pinned (ground rule 1). The MCP SDK joins in phase 8.
+dependencies = ["pytak==7.6.1"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+tak = "takbridge.cli:main"
+tak-bridged = "takbridge.service:main"
+takbridge-gate = "takbridge.sshgate:main"
+
+[tool.setuptools.packages.find]
+include = ["takbridge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

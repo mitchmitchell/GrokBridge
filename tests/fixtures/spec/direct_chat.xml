@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<event version='2.0' uid='GeoChat.ANDROID-abc123.GROK-1.c09f6b91-c5f612ec431f' type='b-t-f' time='2026-11-16T21:00:05.000Z' start='2026-11-16T21:00:05.000Z' stale='2026-11-17T21:00:05.000Z' how='h-g-i-g-o'>
+<point lat='35.0' lon='-90.0' hae='9999999.0' ce='9999999.0' le='9999999.0'/>
+<detail>
+<__chat id='takbridge-GROK-1' chatroom='GROK-1' senderCallsign='MITCH' messageId='m-001'>
+<chatgrp id='takbridge-GROK-1' uid0='ANDROID-abc123' uid1='takbridge-GROK-1'/>
+</__chat>
+<link relation='p-p' uid='ANDROID-abc123' type='a-f-G-U-C'/>
+<remarks time='2026-11-16T21:00:05.000Z' source='BAO.F.ATAK.ANDROID-abc123' to='takbridge-GROK-1'>Mark the trailhead 500 m north of me.</remarks>
+<__serverdestination destinations='192.168.2.110:4242:tcp:ANDROID-abc123'/>
+</detail>
+</event>
