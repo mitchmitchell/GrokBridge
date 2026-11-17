@@ -24,9 +24,15 @@ ATAK ◀──reply / marker─────── TAK Server ◀─────�
 
 ## Install (phase 7)
 
-On the TAK Server host, as root, after filling in the settings at the top:
+On the TAK Server host, as root. The bot's webhook URL works like a
+password, so it and the bot's SSH public key go in a root-only file, never
+in this repository:
 
-    sudo bash deploy/install.sh
+    sudo install -m 600 /dev/null /root/takbridge-secrets.env
+    sudo nano /root/takbridge-secrets.env
+        BOT_WEBHOOK_URL=https://...
+        BOT_SSH_KEY=ssh-ed25519 AAAA... comment
+    sudo SECRETS=/root/takbridge-secrets.env bash deploy/install.sh
 
 It creates the users `takbridge` (service) and `takbot` (bot login), group
 `takadmin`, installs into `/opt/takbridge`, writes `/etc/takbridge/`, sets
