@@ -25,8 +25,9 @@ set -euo pipefail
 
 # ------------------------------------------------------------- settings --
 # Fill these in before running.
-BOT_CALLSIGN="GROK-1"
-BOT_SSH_KEY=""          # GROK-1's public key, one line: ssh-ed25519 AAAA... comment
+BOT_CALLSIGN="GrokBot-Helper"   # what ATAK shows; the certificate below may carry
+                                # another name (it was issued as GROK-1)
+BOT_SSH_KEY=""          # the bot's takbot public key, one line: ssh-ed25519 AAAA... comment
 BOT_WEBHOOK_URL=""      # the bot's wake-up URL. Must be https:// on the internet;
                         # plain http:// is accepted only for tailnet or local addresses.
                         # Each call carries the message text and the sender's position.
@@ -45,7 +46,7 @@ die() { echo "install: $*" >&2; exit 1; }
 step() { echo; echo "== $*"; }
 
 [ "$(id -u)" = 0 ] || die "run as root"
-[ -n "$BOT_SSH_KEY" ] || die "set BOT_SSH_KEY (GROK-1's public key) at the top of this script"
+[ -n "$BOT_SSH_KEY" ] || die "set BOT_SSH_KEY (the bot's public key) at the top of this script"
 [ -n "$BOT_WEBHOOK_URL" ] || die "set BOT_WEBHOOK_URL at the top of this script"
 case "$BOT_SSH_KEY" in ssh-ed25519\ *|ssh-rsa\ *|ecdsa-sha2-*) ;; *) die "BOT_SSH_KEY does not look like a public key";; esac
 case "$BOT_SSH_KEY" in *PRIVATE*) die "that is a private key; use the .pub line";; esac
