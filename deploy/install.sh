@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # tak-bridge phase 7: permanent install on the TAK Server host (zodiac).
 #
-# Review before running. The webhook URL works like a password, so it is
-# never written into this file (the repository is public). Put it and the
-# bot's SSH public key in a root-only file and point the script at it:
+# Review before running. Run as root:
 #
-#   sudo install -m 600 /dev/null /root/takbridge-secrets.env
-#   sudo nano /root/takbridge-secrets.env     # two lines:
-#       BOT_WEBHOOK_URL=https://...
-#       BOT_SSH_KEY=ssh-ed25519 AAAA... comment
-#   sudo SECRETS=/root/takbridge-secrets.env bash deploy/install.sh
+#   sudo bash deploy/install.sh
+#
+# The webhook URL and its key are secrets, and this repository is public, so
+# they are never written here. The script reads them, as root, from the
+# root-only file WEBHOOK_ENV (below), which holds KEY=VALUE lines. Set the four
+# *_VAR names below to the names used in that file. The values are copied
+# into /etc/takbridge/takbridge.ini (mode 600, service user only) and are
+# never printed.
 #
 # Safe to run again; each step checks before it changes anything.
 #
@@ -35,19 +36,18 @@ set -euo pipefail
 # ------------------------------------------------------------- settings --
 BOT_CALLSIGN="GrokBot-Helper"   # what ATAK shows; the certificate below may carry
                                 # another name (it was issued as GROK-1)
-# From the SECRETS file (see above), never from this repository:
-#   BOT_SSH_KEY      the bot's takbot public key: ssh-ed25519 AAAA... comment
-#   BOT_WEBHOOK_URL  the bot's wake-up URL. Must be https:// on the internet;
-#                    plain http:// only for tailnet or local addresses. Each
-#                    call carries the message text and the sender's position.
-BOT_SSH_KEY=""
-BOT_WEBHOOK_URL=""
-if [ -n "${SECRETS:-}" ]; then
-    [ -r "$SECRETS" ] || { echo "install: cannot read $SECRETS" >&2; exit 1; }
-    case "$(stat -c %a "$SECRETS")" in 600|400) ;; *) echo "install: $SECRETS must be mode 600" >&2; exit 1;; esac
-    BOT_SSH_KEY=$(sed -n 's/^BOT_SSH_KEY=//p' "$SECRETS" | head -1)
-    BOT_WEBHOOK_URL=$(sed -n 's/^BOT_WEBHOOK_URL=//p' "$SECRETS" | head -1)
-fi
+# The bot's takbot login key (public half; safe to publish).
+BOT_SSH_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDl1mI3nTnBIW4b1EtGUoKNq4RdILTMlPOMVBn7BclVn GROK-1-takbot@zodiac"
+
+# Webhook settings, read from a root-only file. Each call sends
+#   <header name>: <scheme> <key>      e.g.  Authorization: Bearer ...
+# plus the bridge's own X-TakBridge-Signature, to the URL, which must be
+# https://. Each call carries the message text and the sender's position.
+WEBHOOK_ENV="/etc/grok-bridge/webhook.env"
+URL_VAR="WEBHOOK_URL"           # names of the KEY=VALUE lines in WEBHOOK_ENV;
+HEADER_VAR="WEBHOOK_HEADER"     # change these to match the file
+SCHEME_VAR="WEBHOOK_SCHEME"
+KEY_VAR="WEBHOOK_KEY"
 BOT_CERT="/home/claude/certs/GROK-1.crt.pem"
 BOT_KEY="/home/claude/certs/GROK-1.key"
 CA_CHAIN="/home/claude/certs/magnolia-ca-chain.pem"
@@ -63,9 +63,28 @@ die() { echo "install: $*" >&2; exit 1; }
 step() { echo; echo "== $*"; }
 
 [ "$(id -u)" = 0 ] || die "run as root"
-[ -n "$BOT_SSH_KEY" ] || die "BOT_SSH_KEY missing: run with SECRETS=/root/takbridge-secrets.env"
-[ -n "$BOT_WEBHOOK_URL" ] || die "BOT_WEBHOOK_URL missing: run with SECRETS=/root/takbridge-secrets.env"
-case "$BOT_WEBHOOK_URL" in https://*) ;; *) die "BOT_WEBHOOK_URL must start with https://";; esac
+
+# Read one KEY=VALUE line from WEBHOOK_ENV without running the file as code.
+# Strips surrounding quotes and whitespace (a trailing newline in a header
+# value makes Cursor answer HTTP 400).
+envval() {
+    sed -n "s/^[[:space:]]*\(export[[:space:]]\+\)\?$1[[:space:]]*=[[:space:]]*//p" "$WEBHOOK_ENV" \
+        | head -1 | sed -e 's/[[:space:]]*$//' -e "s/^[\"']//" -e "s/[\"']$//"
+}
+[ -r "$WEBHOOK_ENV" ] || die "cannot read $WEBHOOK_ENV"
+case "$(stat -c '%a %U' "$WEBHOOK_ENV")" in 600\ root|400\ root) ;; *) die "$WEBHOOK_ENV must be mode 600, owned by root";; esac
+BOT_WEBHOOK_URL=$(envval "$URL_VAR")
+WEBHOOK_HEADER=$(envval "$HEADER_VAR")
+WEBHOOK_SCHEME=$(envval "$SCHEME_VAR")
+WEBHOOK_KEY=$(envval "$KEY_VAR")
+for v in BOT_WEBHOOK_URL:$URL_VAR WEBHOOK_HEADER:$HEADER_VAR WEBHOOK_SCHEME:$SCHEME_VAR WEBHOOK_KEY:$KEY_VAR; do
+    name=${v%%:*}
+    [ -n "${!name}" ] || die "no ${v#*:}= line in $WEBHOOK_ENV (set the *_VAR names at the top)"
+done
+case "$BOT_WEBHOOK_URL" in https://*) ;; *) die "the webhook URL must start with https://";; esac
+[[ "$WEBHOOK_HEADER" =~ ^[A-Za-z0-9-]{1,64}$ ]] || die "the webhook header name is not a valid header name"
+[[ "$WEBHOOK_SCHEME$WEBHOOK_KEY" != *[[:space:]]* ]] || die "the webhook scheme or key contains spaces or line breaks"
+echo "webhook: ${BOT_WEBHOOK_URL%%/automations/*}/... with header $WEBHOOK_HEADER: $WEBHOOK_SCHEME <key, ${#WEBHOOK_KEY} characters>"
 case "$BOT_SSH_KEY" in ssh-ed25519\ *|ssh-rsa\ *|ecdsa-sha2-*) ;; *) die "BOT_SSH_KEY does not look like a public key";; esac
 case "$BOT_SSH_KEY" in *PRIVATE*) die "that is a private key; use the .pub line";; esac
 for f in "$BOT_CERT" "$BOT_KEY" "$CA_CHAIN"; do [ -r "$f" ] || die "cannot read $f"; done
@@ -131,6 +150,7 @@ admin_group = takadmin
 
 [bot:$BOT_CALLSIGN]
 webhook_url = $BOT_WEBHOOK_URL
+webhook_header_$WEBHOOK_HEADER = $WEBHOOK_SCHEME $WEBHOOK_KEY
 PYTAK_TLS_CLIENT_CERT = /etc/takbridge/certs/$BOT_CALLSIGN.crt.pem
 PYTAK_TLS_CLIENT_KEY = /etc/takbridge/certs/$BOT_CALLSIGN.key
 PYTAK_TLS_CLIENT_CAFILE = /etc/takbridge/certs/ca-chain.pem

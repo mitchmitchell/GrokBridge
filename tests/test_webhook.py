@@ -71,3 +71,28 @@ def test_unreachable_host_returns_false_quickly():
     ok = asyncio.run(webhook.notify("http://127.0.0.1:9/none", {"bot": "GROK-1"}, SECRET,
                                     timeout=1, retries=1, backoff=0.01))
     assert not ok
+
+
+def test_extra_headers_are_sent():
+    seen = {}
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            # Header names are case-insensitive; urllib normalises their case.
+            seen.update({k.lower(): v for k, v in self.headers.items()})
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    httpd = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    ok = asyncio.run(webhook.notify(f"http://127.0.0.1:{httpd.server_port}/x", {"bot": "B"},
+                                    SECRET, retries=0,
+                                    headers={"Authorization": "Bearer k1"}))
+    httpd.shutdown()
+    assert ok and seen["authorization"] == "Bearer k1"
+    assert seen[webhook.SIGNATURE_HEADER.lower()]

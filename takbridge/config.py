@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+
 # Real ATAK callsigns include "/" (e.g. AE5HO/TAK, captured 2026-11-17).
 CALLSIGN_RE = re.compile(r"^[A-Za-z0-9 _.\-/]{1,40}$")
 
@@ -34,6 +36,9 @@ class Bot:
     uid: str
     tls: dict = field(default_factory=dict)
     token_sha256: str | None = None  # phase 8 (MCP)
+    # Extra HTTP headers for the webhook, e.g. {"Authorization": "Bearer ..."}
+    # for a Cursor automation. Secret; never logged.
+    webhook_headers: dict = field(default_factory=dict, repr=False)
 
 
 @dataclass
@@ -177,12 +182,26 @@ def parse(cp: configparser.ConfigParser) -> Config:
                 f"config: [{section}] webhook_url must use https:// for an internet "
                 "address; plain http:// is allowed only on the tailnet or this machine")
         tls = {k: s[k] for k in TLS_KEYS if k in s}
+        headers = {}
+        for key in s:
+            if not key.startswith("webhook_header_"):
+                continue
+            name, value = key[len("webhook_header_"):], s[key].strip()
+            if not HEADER_NAME_RE.match(name):
+                raise ValueError(f"config: [{section}] bad header name {name!r}")
+            if not value or any(c in value for c in "\r\n\x00"):
+                raise ValueError(f"config: [{section}] header {name} is empty or has line breaks")
+            if name.lower() in ("content-type", "content-length", "host",
+                                "x-takbridge-signature"):
+                raise ValueError(f"config: [{section}] header {name} is set by the bridge")
+            headers[name] = value
         cfg.bots[callsign] = Bot(
             callsign=callsign,
             webhook_url=url,
             uid=s.get("uid", _bot_uid(callsign)),
             tls=tls,
             token_sha256=s.get("token_sha256") or None,
+            webhook_headers=headers,
         )
     if not cfg.bots:
         raise ValueError("config: no [bot:CALLSIGN] sections")

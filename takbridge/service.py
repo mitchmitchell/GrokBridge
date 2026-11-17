@@ -132,7 +132,8 @@ class Service:
     def fire_webhook(self, bot: Bot, body: dict) -> None:
         t = asyncio.create_task(webhook.notify(
             bot.webhook_url, body, self.cfg.webhook_secret,
-            timeout=self.cfg.webhook_timeout_s, retries=self.cfg.webhook_retries))
+            timeout=self.cfg.webhook_timeout_s, retries=self.cfg.webhook_retries,
+            headers=bot.webhook_headers))
         self._webhooks.add(t)
         t.add_done_callback(self._webhooks.discard)
 

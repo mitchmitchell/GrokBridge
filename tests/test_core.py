@@ -230,3 +230,16 @@ def test_webhook_url_must_be_https_off_the_tailnet(url, ok):
     else:
         with pytest.raises(ValueError):
             make_config(webhook=url)
+
+
+def test_webhook_headers_from_config():
+    from takbridge import config
+    base = ("[bridge]\ncot_url = tcp://h:1\nlat = 1\nlon = 1\n"
+            "webhook_secret = 0123456789abcdef0123\n[bot:B]\nwebhook_url = https://x.example/h\n")
+    cfg = config.loads(base + "webhook_header_Authorization = Bearer abc  \n")
+    assert cfg.bots["B"].webhook_headers == {"Authorization": "Bearer abc"}
+    assert "abc" not in repr(cfg.bots["B"])  # never shown in logs
+    for bad in ("webhook_header_Content-Type = x\n", "webhook_header_Bad Name = x\n",
+                "webhook_header_X-Signature = \n"):
+        with pytest.raises(ValueError):
+            config.loads(base + bad)
