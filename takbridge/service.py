@@ -30,6 +30,7 @@ log = logging.getLogger("takbridge")
 READ_CHUNK = 65536
 MAX_BUFFER = 1024 * 1024  # larger than any accepted event (256 KB requests)
 FATAL_RETRY_S = 60
+SUMMARY_S = 15 * 60  # activity summary in the log every 15 minutes
 
 
 class BotLink:
@@ -150,6 +151,7 @@ class Service:
                 loop.add_signal_handler(sig, stop.set)
             except (NotImplementedError, RuntimeError):
                 pass
+        tasks.append(asyncio.create_task(self._summary()))
         try:
             await stop.wait()
         finally:
@@ -159,13 +161,30 @@ class Service:
             self.store.close()
             log.info("stopped; counters %s", self.bridge.counters)
 
+    async def _summary(self, every_s: int = SUMMARY_S) -> None:
+        """Log what arrived in the last interval, so a quiet log means a
+        quiet network rather than a silent failure."""
+        last: dict[str, int] = {}
+        while True:
+            await asyncio.sleep(every_s)
+            now = dict(self.bridge.counters)
+            delta = {k: v - last.get(k, 0) for k, v in now.items() if v - last.get(k, 0)}
+            last = now
+            links = ", ".join(f"{cs} {'up' if l.connected else 'DOWN'}"
+                              for cs, l in self.links.items())
+            log.info("last %d min: %s; %s", every_s // 60,
+                     ", ".join(f"{k} {v}" for k, v in sorted(delta.items())) or "nothing received",
+                     links)
+
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     path = argv[0] if argv else os.environ.get("TAKBRIDGE_CONFIG", "/etc/takbridge/takbridge.ini")
+    # journald adds its own timestamps; force=True so nothing imported first
+    # can leave the root logger at WARNING.
     logging.basicConfig(
         level=os.environ.get("TAKBRIDGE_LOG", "INFO").upper(),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+        format="%(levelname)s %(name)s: %(message)s", force=True)
     try:
         cfg = load(path)
     except (OSError, ValueError) as exc:

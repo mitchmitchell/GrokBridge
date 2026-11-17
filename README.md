@@ -146,6 +146,15 @@ After reviewing a new GrokBridge commit, as root:
 It reinstalls the code at that commit and restarts the service; the
 configuration, certificates, database and SSH gate stay as they are.
 
+## The log
+
+`journalctl -u tak-bridged` shows connects and disconnects, each chat and
+plugin request (sender and message id), new shared map items, devices
+leaving, every `tak` command with its result and who it was about, webhook
+deliveries, and a summary every 15 minutes of what arrived. It never records
+message text, marker names or coordinates. Set `TAKBRIDGE_LOG=DEBUG` in the
+unit for more.
+
 ## Running and stopping
 
     sudo systemctl status tak-bridged

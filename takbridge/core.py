@@ -77,6 +77,9 @@ class Bridge:
             return []
         if isinstance(what, cot.Disconnected):
             self.store.mark_disconnected(what.uid)
+            c = self.store.contact_by_uid(what.uid)
+            log.info("bot %s: %s disconnected from the TAK Server", bot,
+                     (c or {}).get("callsign") or what.uid)
             self._count("disconnected")
             return []
         if isinstance(what, cot.DirectChat):
@@ -84,6 +87,9 @@ class Bridge:
                 self.store.see_contact(what.from_uid, what.from_callsign, None, None, None)
             entry = self._store_entry(bot, what.message_id, "chat", what.from_uid,
                                       what.from_callsign, what.text, None, what.time)
+            # Who and which message, never the text (activity log).
+            log.info("bot %s: chat from %s (message %s)%s", bot, what.from_callsign,
+                     what.message_id, "" if entry else ", duplicate ignored")
             return [entry] if entry else []
         if isinstance(what, cot.GrokLink):
             return self._handle_groklink(bot, what)
@@ -93,7 +99,13 @@ class Bridge:
             # own view) for the map and mapitem tools. They never wake the
             # bot: ATAK re-sends shared items often (captured: every ~15 s),
             # and the server strips the routing that would say "for this bot".
+            is_new = self.store.map_item(bot, what.uid) is None
             self.store.put_map_item(bot, what)
+            if is_new:
+                log.info("bot %s: new shared %s %r from %s", bot, what.kind, what.name,
+                         what.creator_callsign)
+            else:
+                log.debug("bot %s: update to %s %r", bot, what.kind, what.name)
             self._count("map_item")
             return []
         self._count("group_chat" if isinstance(what, cot.GroupChat) else "other")
@@ -136,6 +148,8 @@ class Bridge:
                                        keep=lim.snapshots_kept)
         entry = self._store_entry(bot, g.event_uid, "request", g.from_uid, callsign,
                                   text, data, g.time)
+        log.info("bot %s: plugin request from %s (message %s)%s", bot, callsign or g.from_uid,
+                 g.event_uid, "" if entry else ", duplicate ignored")
         return [entry] if entry else []
 
     def _store_entry(self, bot, message_id, kind, from_uid, from_callsign, text, data,
@@ -181,9 +195,21 @@ class Bridge:
             if not isinstance(args, dict):
                 raise ToolError("arguments must be an object")
             result = getattr(self, "_t_" + tool)(bot, args)
+            log.info("bot %s: %s ok%s", bot, tool, self._log_target(tool, args))
             return {"ok": True, **result}
         except ToolError as exc:
+            log.info("bot %s: %s refused%s: %s", bot, tool, self._log_target(tool, args), exc)
             return {"ok": False, "error": str(exc)}
+
+    @staticmethod
+    def _log_target(tool: str, args) -> str:
+        """Who a command was about, for the activity log. Never message
+        text, marker names or coordinates."""
+        if not isinstance(args, dict):
+            return ""
+        who = args.get("to") if tool in ("say", "mark") else (
+            args.get("callsign") if tool == "where" else None)
+        return f" ({str(who)[:40]})" if isinstance(who, str) and who else ""
 
     # --- helpers
 

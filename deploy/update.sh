@@ -7,8 +7,13 @@
 # /opt/takbridge/venv, and restarts tak-bridged. Leaves the configuration,
 # certificates, database, users and SSH gate as they are. The database is
 # upgraded in place by the service when it starts (new columns only).
+#
+# Run it exactly as written: no umask or permission changes around it. The
+# service user must be able to read the installed package (files 644, dirs
+# 755 under /opt/takbridge); this script sets that itself.
 
 set -euo pipefail
+umask 022
 
 die() { echo "update: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || die "run as root"
@@ -25,6 +30,10 @@ echo "== to:   $(git -C "$SRC" log --oneline -1)"
 
 /opt/takbridge/venv/bin/pip install -q "$SRC"
 chown -R root:root /opt/takbridge
+chmod -R u+rwX,go+rX,go-w /opt/takbridge   # readable by the service, writable by root only
+# Fail before restarting if the service user still cannot import the code.
+runuser -u takbridge -- /opt/takbridge/venv/bin/python -c "import takbridge.service" \
+    || die "takbridge cannot import the installed code; the old version keeps running"
 if ! cmp -s "$SRC/deploy/tak-bridged.service" /etc/systemd/system/tak-bridged.service; then
     install -m 0644 -o root -g root "$SRC/deploy/tak-bridged.service" /etc/systemd/system/tak-bridged.service
     systemctl daemon-reload

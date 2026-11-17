@@ -52,8 +52,11 @@ BOT_CERT="/home/claude/certs/GROK-1.crt.pem"
 BOT_KEY="/home/claude/certs/GROK-1.key"
 CA_CHAIN="/home/claude/certs/magnolia-ca-chain.pem"
 COT_URL="tls://zodiac.snowy-pangolin.ts.net:8089"
-BOT_LAT="35.0"          # where the bot appears on the map
-BOT_LON="-90.0"
+# Where the bot appears on the map. A personal location, so it is read from
+# WEBHOOK_ENV too (never stored in this public repository). Needed only when
+# the script writes a new takbridge.ini; an existing one keeps its position.
+LAT_VAR="GROK1_BOT_LAT"
+LON_VAR="GROK1_BOT_LON"
 ADMINS="claude"         # users who may run 'tak --bot NAME' locally
 REPO="https://github.com/mitchmitchell/GrokBridge.git"
 REF="3552b5a"           # code version installed (GrokBridge commit)
@@ -85,6 +88,13 @@ case "$BOT_WEBHOOK_URL" in https://*) ;; *) die "the webhook URL must start with
 [[ "$WEBHOOK_HEADER" =~ ^[A-Za-z0-9-]{1,64}$ ]] || die "the webhook header name is not a valid header name"
 [[ "$WEBHOOK_SCHEME$WEBHOOK_KEY" != *[[:space:]]* ]] || die "the webhook scheme or key contains spaces or line breaks"
 echo "webhook: ${BOT_WEBHOOK_URL%%/automations/*}/... with header $WEBHOOK_HEADER: $WEBHOOK_SCHEME <key, ${#WEBHOOK_KEY} characters>"
+BOT_LAT=$(envval "$LAT_VAR")
+BOT_LON=$(envval "$LON_VAR")
+if [ ! -f /etc/takbridge/takbridge.ini ]; then
+    python3 -c "import sys; la, lo = float(sys.argv[1]), float(sys.argv[2]); sys.exit(not (-90 <= la <= 90 and -180 <= lo <= 180 and (la, lo) != (0.0, 0.0)))" \
+        "${BOT_LAT:-x}" "${BOT_LON:-x}" 2>/dev/null \
+        || die "set $LAT_VAR= and $LON_VAR= in $WEBHOOK_ENV (where the bot appears on the map)"
+fi
 case "$BOT_SSH_KEY" in ssh-ed25519\ *|ssh-rsa\ *|ecdsa-sha2-*) ;; *) die "BOT_SSH_KEY does not look like a public key";; esac
 case "$BOT_SSH_KEY" in *PRIVATE*) die "that is a private key; use the .pub line";; esac
 for f in "$BOT_CERT" "$BOT_KEY" "$CA_CHAIN"; do [ -r "$f" ] || die "cannot read $f"; done

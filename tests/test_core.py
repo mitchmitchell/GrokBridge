@@ -258,3 +258,20 @@ def test_chat_does_not_make_an_old_position_look_fresh(env):
     bridge.handle_event("GROK-1", fixture("direct_chat.xml"))  # MITCH chats; no new fix
     w = bridge.call("GROK-1", "where", {"callsign": "MITCH"})
     assert w["age_s"] == 600 and w["online"] is True
+
+
+def test_activity_log_never_contains_text_or_coordinates(env, caplog):
+    import logging
+    bridge, store, clock, sent = env
+    caplog.set_level(logging.INFO, logger="takbridge.core")
+    bridge.handle_event("GROK-1", fixture("direct_chat.xml"))
+    bridge.call("GROK-1", "say", {"to": "MITCH", "text": "secret reply words"})
+    bridge.call("GROK-1", "mark", {"to": "MITCH", "lat": 35.0045, "lon": -90, "name": "Hidden"})
+    bridge.call("GROK-1", "mark", {"to": "MITCH", "lat": 135, "lon": -90, "name": "X"})
+    bridge.call("GROK-1", "where", {"callsign": "MITCH"})
+    log = caplog.text
+    assert "chat from MITCH (message m-001)" in log
+    assert "say ok (MITCH)" in log and "mark ok (MITCH)" in log and "where ok (MITCH)" in log
+    assert "mark refused (MITCH): lat must be between -90 and 90" in log
+    for private in ("Mark the trailhead", "secret reply words", "Hidden", "35.0045", "-90.0"):
+        assert private not in log, private
