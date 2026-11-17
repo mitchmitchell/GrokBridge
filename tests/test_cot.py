@@ -65,7 +65,8 @@ def test_built_chat_parses_back(text):
 
 
 def test_built_marker_escapes_and_targets_one_recipient():
-    data = cot.build_marker(bot_uid=BOT, to_callsign="MITCH", uid="takbridge-GROK-1-u1",
+    data = cot.build_marker(bot_uid=BOT, bot_callsign="GROK-1", to_callsign="MITCH",
+                            uid="takbridge-GROK-1-u1",
                             lat=35.0045, lon=-90, name='Trail <head> & "x"',
                             remarks="a<b", now=NOW)
     ev = cot.parse_event(data)

@@ -80,6 +80,13 @@ class Bridge:
             return [entry] if entry else []
         if isinstance(what, cot.GrokLink):
             return self._handle_groklink(bot, what)
+        if isinstance(what, cot.MapItem):
+            # Shared map items reach every member of the group, and the server
+            # strips the routing that would say "sent to this bot", so they are
+            # counted, not stored as inbox entries. The plugin's snapshots are
+            # how a user hands the bot map items on purpose.
+            self._count("map_item")
+            return []
         self._count("group_chat" if isinstance(what, cot.GroupChat) else "other")
         return []
 
@@ -233,7 +240,8 @@ class Bridge:
         self._rate_check(bot)
         b = self.cfg.bot(bot)
         uid = f"takbridge-{b.callsign}-{uuid.uuid4()}"
-        data = cot.build_marker(bot_uid=b.uid, to_callsign=to["callsign"], uid=uid,
+        data = cot.build_marker(bot_uid=b.uid, bot_callsign=b.callsign,
+                                to_callsign=to["callsign"], uid=uid,
                                 lat=lat, lon=lon, name=name, remarks=remarks, now=self._now())
         if not self.send(bot, data):
             raise ToolError("the TAK Server connection is down; not sent")

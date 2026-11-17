@@ -3,12 +3,14 @@
 Parsing follows docs/TakChatSpec.odt in the ATAK-CIV SDK (P2P messages,
 section 4.1; server routing with <marti>, section 3.2).
 
-PROVISIONAL BUILDERS: build_chat, build_marker and build_presence are written
-from that spec, not yet from traffic captured on the live TAK Server. Ground
-rule 3 makes captured traffic the source of truth: phases 1, 2 and 5 replace
-them with versions matched field by field to the captured fixtures in
-tests/fixtures/captured/. Until then they are used only against the fake
-TAK Server in the tests.
+Builders and captured traffic (ground rule 3, tests/fixtures/captured/):
+  * build_marker follows the captured ATAK marker field by field.
+  * build_chat matches the captured direct chats element for element
+    (__chat, chatgrp, link, remarks); it adds <marti> for server routing and
+    leaves out __serverdestination, which names a device's own address.
+    Confirmed in phase 5 when a reply shows up in ATAK.
+  * build_presence makes ATAK list the bot as a contact (seen 2026-11-17);
+    it carries the same contact-making elements as captured positions.
 """
 
 from __future__ import annotations
@@ -167,6 +169,22 @@ class GrokLink:
 
 
 @dataclass
+class MapItem:
+    """A marker or other map item shared in the bot's group.
+
+    The TAK Server strips <marti> before delivery, so the bridge cannot tell
+    an item sent only to the bot from one shared with the whole group
+    (captured: a marker edited on the phone arrived 33 times)."""
+    uid: str
+    type: str
+    name: str | None
+    lat: float
+    lon: float
+    remarks: str
+    from_uid: str
+
+
+@dataclass
 class Other:
     type: str
 
@@ -214,15 +232,18 @@ def classify(ev: Event, bot_uid: str):
 
     contact = ev.find("contact")
     if ev.type.startswith("a-") and ev.lat is not None and ev.lon is not None:
-        return Position(
-            uid=ev.uid,
-            # ATAK can send trailing spaces ("AE5HO/TAK "); store it trimmed.
-            callsign=(contact.get("callsign") or "").strip() or None
-            if contact is not None else None,
-            lat=ev.lat,
-            lon=ev.lon,
-            time=ev.time,
-        )
+        # ATAK can send trailing spaces ("AE5HO/TAK "); keep it trimmed.
+        callsign = ((contact.get("callsign") if contact is not None else None) or "").strip() or None
+        # A device reporting its own position names a stream endpoint on its
+        # <contact> (captured: "*:-1:stcp"). Markers and other map items do
+        # not (captured marker_first.xml), so they never become contacts.
+        if contact is not None and contact.get("endpoint"):
+            return Position(uid=ev.uid, callsign=callsign, lat=ev.lat, lon=ev.lon,
+                            time=ev.time)
+        remarks = ev.find("remarks")
+        return MapItem(uid=ev.uid, type=ev.type, name=callsign, lat=ev.lat, lon=ev.lon,
+                       remarks=(remarks.text or "") if remarks is not None else "",
+                       from_uid=sender_uid(ev) or "")
     return Other(ev.type)
 
 
@@ -305,15 +326,27 @@ def build_chat(*, bot_uid: str, bot_callsign: str, to_uid: str, to_callsign: str
     return _bytes(ev)
 
 
-def build_marker(*, bot_uid: str, to_callsign: str, uid: str, lat: float, lon: float,
-                 name: str, remarks: str, now: datetime, stale_s: int = 86400) -> bytes:
-    """PROVISIONAL (see module docstring). A point marker for one recipient."""
+def build_marker(*, bot_uid: str, bot_callsign: str, to_callsign: str, uid: str,
+                 lat: float, lon: float, name: str, remarks: str, now: datetime,
+                 stale_s: int = 86400) -> bytes:
+    """A point marker for one recipient, shaped like the marker ATAK itself
+    sent (tests/fixtures/captured/marker_first.xml): same type, how and
+    detail elements, with the bot as creator. <marti> is added so the server
+    delivers it to the recipient only."""
     ev, detail = _event(uid, "a-u-G", "h-g-i-g-o", lat, lon, now,
                         now + timedelta(seconds=stale_s))
+    t = cot_time(now)
     ET.SubElement(detail, "contact", {"callsign": name})
-    ET.SubElement(detail, "link", {"uid": bot_uid, "type": "a-f-G-U-C", "relation": "p-p"})
+    ET.SubElement(detail, "status", {"readiness": "true"})
+    ET.SubElement(detail, "archive")
+    ET.SubElement(detail, "creator", {"uid": bot_uid, "callsign": bot_callsign, "time": t,
+                                      "type": "a-f-G-U-C"})
+    ET.SubElement(detail, "link", {"uid": bot_uid, "production_time": t, "type": "a-f-G-U-C",
+                                   "parent_callsign": bot_callsign, "relation": "p-p"})
+    ET.SubElement(detail, "color", {"argb": "-1"})
     r = ET.SubElement(detail, "remarks")
     r.text = remarks
+    ET.SubElement(detail, "usericon", {"iconsetpath": "COT_MAPPING_2525C/a-u/a-u-G"})
     _marti(detail, to_callsign)
     return _bytes(ev)
 
