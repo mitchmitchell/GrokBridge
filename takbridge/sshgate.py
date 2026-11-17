@@ -22,7 +22,8 @@ import sys
 from . import cli
 from .config import CALLSIGN_RE
 
-ALLOWED = {"inbox", "say", "mark", "where", "contacts", "status", "sitrep", "items", "item"}
+ALLOWED = {"inbox", "say", "mark", "where", "contacts", "status", "map", "mapitem",
+           "sitrep", "items", "item"}
 METACHARS = re.compile(r"[;&|`$<>\\(){}\n\r\x00]")
 
 

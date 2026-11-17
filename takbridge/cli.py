@@ -57,6 +57,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("contacts", help="callsigns seen")
     sub.add_parser("status", help="this bot's connection")
 
+    s = sub.add_parser("map", help="markers, routes, shapes and range lines shared with this bot")
+    s.add_argument("--kind", choices=["marker", "route", "shape", "rab"])
+    s.add_argument("--name", help="only items whose name contains this text")
+    s.add_argument("--near", nargs=2, metavar=("LAT", "LON"))
+    s.add_argument("--radius", help="metres around --near (default 1000)")
+    s.add_argument("--limit")
+
+    s = sub.add_parser("mapitem", help="one shared map item in full")
+    s.add_argument("uid")
+
     s = sub.add_parser("sitrep", help="latest map summary from a user")
     s.add_argument("--from", dest="from_")
 
@@ -84,6 +94,14 @@ def args_to_request(ns: argparse.Namespace) -> tuple[str, dict]:
         a = {"to": ns.to, "lat": ns.lat, "lon": ns.lon, "name": ns.name, "remarks": ns.remarks}
     elif cmd == "where":
         a = {"callsign": ns.callsign}
+    elif cmd == "map":
+        for k in ("kind", "name", "radius", "limit"):
+            if getattr(ns, k) is not None:
+                a[k] = getattr(ns, k)
+        if ns.near:
+            a["near"] = ns.near
+    elif cmd == "mapitem":
+        a = {"uid": ns.uid}
     elif cmd in ("sitrep", "items", "item"):
         if ns.from_:
             a["from"] = ns.from_

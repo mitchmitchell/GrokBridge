@@ -24,8 +24,10 @@ from .store import Store
 
 log = logging.getLogger("takbridge.core")
 
-TOOLS = ("inbox", "say", "mark", "where", "contacts", "status", "sitrep", "items", "item")
+TOOLS = ("inbox", "say", "mark", "where", "contacts", "status", "map", "mapitem",
+         "sitrep", "items", "item")
 ITEM_KINDS = ("marker", "contact", "route", "shape", "rab", "bloodhound", "track", "other")
+MAP_KINDS = ("marker", "route", "shape", "rab")
 
 
 def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -69,8 +71,13 @@ class Bridge:
 
         what = cot.classify(ev, b.uid)
         if isinstance(what, cot.Position):
-            self.store.see_contact(what.uid, what.callsign, what.lat, what.lon, cot.iso(what.time))
+            self.store.see_contact(what.uid, what.callsign, what.lat, what.lon,
+                                   cot.iso(what.time), what.speed_mps, what.course_deg)
             self._count("position")
+            return []
+        if isinstance(what, cot.Disconnected):
+            self.store.mark_disconnected(what.uid)
+            self._count("disconnected")
             return []
         if isinstance(what, cot.DirectChat):
             if what.from_uid:
@@ -81,10 +88,12 @@ class Bridge:
         if isinstance(what, cot.GrokLink):
             return self._handle_groklink(bot, what)
         if isinstance(what, cot.MapItem):
-            # Shared map items reach every member of the group, and the server
-            # strips the routing that would say "sent to this bot", so they are
-            # counted, not stored as inbox entries. The plugin's snapshots are
-            # how a user hands the bot map items on purpose.
+            # Markers, routes, shapes and range lines shared in the group or
+            # sent to the bot. Stored per bot (each bot's connection has its
+            # own view) for the map and mapitem tools. They never wake the
+            # bot: ATAK re-sends shared items often (captured: every ~15 s),
+            # and the server strips the routing that would say "for this bot".
+            self.store.put_map_item(bot, what)
             self._count("map_item")
             return []
         self._count("group_chat" if isinstance(what, cot.GroupChat) else "other")
@@ -149,7 +158,7 @@ class Bridge:
         }
         pos = self.store.contact_by_uid(from_uid) if from_uid else None
         if pos and pos.get("lat") is not None:
-            body["sender_position"] = {"lat": pos["lat"], "lon": pos["lon"], "time": pos["time"]}
+            body["sender_position"] = self._position(pos)
         if data is not None:
             if isinstance(data.get("summary"), dict):
                 body["summary"] = data["summary"]
@@ -174,6 +183,15 @@ class Bridge:
             return {"ok": False, "error": str(exc)}
 
     # --- helpers
+
+    @staticmethod
+    def _position(c: dict) -> dict:
+        p = {"lat": c["lat"], "lon": c["lon"], "time": c["time"]}
+        if c.get("speed_mps") is not None:
+            p["speed_mps"] = round(c["speed_mps"], 2)
+        if c.get("course_deg") is not None:
+            p["course_deg"] = round(c["course_deg"], 1)
+        return p
 
     def _recipient(self, value) -> dict:
         cs = validate.callsign(value, "to")
@@ -254,15 +272,70 @@ class Bridge:
         if c is None or c.get("lat") is None:
             raise ToolError(f"no position known for {cs}")
         age = max(0, int(self.clock() - c["last_seen"]))
-        return {"callsign": cs, "lat": c["lat"], "lon": c["lon"], "time": c["time"],
-                "age_s": age, "stale": age > self.cfg.limits.stale_after_s}
+        return {"callsign": cs, **self._position(c), "age_s": age,
+                "stale": age > self.cfg.limits.stale_after_s,
+                "online": c.get("disconnected_at") is None}
 
     def _t_contacts(self, bot, args):
         now = self.clock()
         own = {b.uid for b in self.cfg.bots.values()}
         return {"contacts": [
-            {"callsign": c["callsign"], "last_seen_s": max(0, int(now - c["last_seen"]))}
+            {"callsign": c["callsign"], "last_seen_s": max(0, int(now - c["last_seen"])),
+             "online": c.get("disconnected_at") is None}
             for c in self.store.contacts(exclude_uids=own)]}
+
+    def _t_map(self, bot, args):
+        """Shared map items this bot has received, newest first, or nearest
+        first with near/radius."""
+        kind = args.get("kind")
+        if kind is not None and kind not in MAP_KINDS:
+            raise ToolError(f"kind must be one of {', '.join(MAP_KINDS)}")
+        limit = validate.positive_int(args.get("limit", 50), "limit", 500)
+        name = args.get("name")
+        if name is not None:
+            name = validate.text(name, "name", 100).lower()
+        center = rad = None
+        if args.get("near") is not None:
+            near = args["near"]
+            if not isinstance(near, (list, tuple)) or len(near) != 2:
+                raise ToolError("near must be [lat, lon]")
+            center = (validate.lat(near[0]), validate.lon(near[1]))
+            rad = validate.radius(args.get("radius", 1000))
+        rows = []
+        for it in self.store.map_items(bot):
+            if kind and it["kind"] != kind:
+                continue
+            if name and name not in (it["name"] or "").lower():
+                continue
+            brief = {k: it[k] for k in ("uid", "kind", "name", "lat", "lon",
+                                         "creator_callsign")}
+            brief["has_notes"] = bool(it["remarks"])
+            if it["kind"] == "route":
+                brief["length_m"] = round(sum(
+                    distance_m(*a, *b) for a, b in zip(it["points"], it["points"][1:])), 1)
+                brief["points"] = len(it["points"])
+            for k in ("radius_m", "range_m", "bearing_deg", "shape"):
+                if k in it["extra"]:
+                    brief[k] = it["extra"][k]
+            if center is not None:
+                if it["lat"] is None or it["lon"] is None:
+                    continue
+                d = distance_m(center[0], center[1], it["lat"], it["lon"])
+                if d > rad:
+                    continue
+                brief["distance_m"] = round(d, 1)
+            rows.append(brief)
+        if center is not None:
+            rows.sort(key=lambda r: r["distance_m"])
+        return {"items": rows[:limit], "more": len(rows) > limit}
+
+    def _t_mapitem(self, bot, args):
+        uid = validate.text(args.get("uid"), "uid", 200)
+        it = self.store.map_item(bot, uid)
+        if it is None:
+            raise ToolError(f"no shared map item {uid}")
+        del it["updated_at"]
+        return {"item": it}
 
     def _t_status(self, bot, args):
         return {"bot": bot, "connected": bool(self.connected(bot)),

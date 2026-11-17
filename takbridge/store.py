@@ -58,6 +58,23 @@ CREATE TABLE IF NOT EXISTS snapshot_parts (
     part INTEGER NOT NULL,
     PRIMARY KEY (bot, sender_uid, snapshot_id, part)
 );
+CREATE TABLE IF NOT EXISTS map_items (
+    bot              TEXT NOT NULL,           -- the connection that received it
+    uid              TEXT NOT NULL,
+    kind             TEXT NOT NULL,           -- marker | route | shape | rab
+    type             TEXT NOT NULL,           -- CoT type
+    name             TEXT,
+    lat              REAL,
+    lon              REAL,
+    remarks          TEXT,
+    creator_uid      TEXT,
+    creator_callsign TEXT,
+    points           TEXT,                    -- JSON [[lat, lon], ...]
+    extra            TEXT,                    -- JSON
+    stale            REAL,                    -- epoch seconds, from the event
+    updated_at       REAL NOT NULL,
+    PRIMARY KEY (bot, uid)
+);
 CREATE TABLE IF NOT EXISTS items (
     bot TEXT NOT NULL, sender_uid TEXT NOT NULL, snapshot_id TEXT NOT NULL,
     uid       TEXT NOT NULL,
@@ -84,6 +101,15 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Columns added after the first live database was created."""
+        have = {r["name"] for r in self.db.execute("PRAGMA table_info(contacts)")}
+        for col, decl in (("speed_mps", "REAL"), ("course_deg", "REAL"),
+                          ("disconnected_at", "REAL")):
+            if col not in have:
+                self.db.execute(f"ALTER TABLE contacts ADD COLUMN {col} {decl}")
 
     def close(self) -> None:
         self.db.close()
@@ -129,16 +155,60 @@ class Store:
     # --------------------------------------------------------- contacts --
 
     def see_contact(self, uid: str, callsign: str | None, lat: float | None,
-                    lon: float | None, time: str | None) -> None:
+                    lon: float | None, time: str | None, speed_mps: float | None = None,
+                    course_deg: float | None = None) -> None:
+        """Record a sighting. Any sighting means the contact is connected."""
         self.db.execute(
-            "INSERT INTO contacts (uid, callsign, lat, lon, time, last_seen)"
-            " VALUES (?,?,?,?,?,?) ON CONFLICT(uid) DO UPDATE SET"
+            "INSERT INTO contacts (uid, callsign, lat, lon, time, last_seen, speed_mps,"
+            " course_deg, disconnected_at) VALUES (?,?,?,?,?,?,?,?,NULL)"
+            " ON CONFLICT(uid) DO UPDATE SET"
             " callsign=COALESCE(excluded.callsign, contacts.callsign),"
             " lat=COALESCE(excluded.lat, contacts.lat),"
             " lon=COALESCE(excluded.lon, contacts.lon),"
             " time=COALESCE(excluded.time, contacts.time),"
-            " last_seen=excluded.last_seen",
-            (uid, callsign, lat, lon, time, self.clock()))
+            " speed_mps=COALESCE(excluded.speed_mps, contacts.speed_mps),"
+            " course_deg=COALESCE(excluded.course_deg, contacts.course_deg),"
+            " last_seen=excluded.last_seen, disconnected_at=NULL",
+            (uid, callsign, lat, lon, time, self.clock(), speed_mps, course_deg))
+
+    def mark_disconnected(self, uid: str) -> None:
+        self.db.execute("UPDATE contacts SET disconnected_at=? WHERE uid=?",
+                        (self.clock(), uid))
+
+    # -------------------------------------------------------- map items --
+
+    def put_map_item(self, bot: str, it) -> None:
+        """Insert or replace one shared map item (a cot.MapItem)."""
+        self.db.execute(
+            "INSERT OR REPLACE INTO map_items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (bot, it.uid, it.kind, it.type, it.name, it.lat, it.lon, it.remarks,
+             it.creator_uid, it.creator_callsign,
+             json.dumps(it.points, separators=(",", ":")),
+             json.dumps(it.extra, separators=(",", ":")),
+             it.stale.timestamp() if it.stale else None, self.clock()))
+
+    def map_items(self, bot: str) -> list[dict]:
+        """Unexpired map items this bot's connection has received."""
+        now = self.clock()
+        self.db.execute("DELETE FROM map_items WHERE bot=? AND stale IS NOT NULL AND stale<?",
+                        (bot, now))
+        rows = self.db.execute(
+            "SELECT * FROM map_items WHERE bot=? ORDER BY updated_at DESC", (bot,)).fetchall()
+        return [self._map_row(r) for r in rows]
+
+    def map_item(self, bot: str, uid: str) -> dict | None:
+        r = self.db.execute(
+            "SELECT * FROM map_items WHERE bot=? AND uid=? AND (stale IS NULL OR stale>=?)",
+            (bot, uid, self.clock())).fetchone()
+        return self._map_row(r) if r else None
+
+    @staticmethod
+    def _map_row(r: sqlite3.Row) -> dict:
+        d = {k: r[k] for k in ("uid", "kind", "type", "name", "lat", "lon", "remarks",
+                               "creator_uid", "creator_callsign", "updated_at")}
+        d["points"] = json.loads(r["points"] or "[]")
+        d["extra"] = json.loads(r["extra"] or "{}")
+        return d
 
     def contact_by_callsign(self, callsign: str) -> dict | None:
         r = self.db.execute(
@@ -152,7 +222,8 @@ class Store:
 
     def contacts(self, exclude_uids: set[str] = frozenset()) -> list[dict]:
         rows = self.db.execute(
-            "SELECT uid, callsign, last_seen FROM contacts WHERE callsign IS NOT NULL"
+            "SELECT uid, callsign, last_seen, disconnected_at FROM contacts"
+            " WHERE callsign IS NOT NULL"
             " ORDER BY callsign").fetchall()
         return [dict(r) for r in rows if r["uid"] not in exclude_uids]
 

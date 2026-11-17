@@ -143,6 +143,15 @@ class Position:
     lat: float
     lon: float
     time: datetime | None
+    speed_mps: float | None = None   # <track speed> (captured: m/s)
+    course_deg: float | None = None  # <track course>, degrees
+
+
+@dataclass
+class Disconnected:
+    """t-x-d-d: the TAK Server says a client disconnected. Captured with the
+    tablet's uid and with takbridge-GROK-1's in the p-p link."""
+    uid: str
 
 
 @dataclass
@@ -170,18 +179,29 @@ class GrokLink:
 
 @dataclass
 class MapItem:
-    """A marker or other map item shared in the bot's group.
+    """A marker, route, shape or range-and-bearing line shared in the bot's
+    group or sent to the bot.
 
     The TAK Server strips <marti> before delivery, so the bridge cannot tell
     an item sent only to the bot from one shared with the whole group
-    (captured: a marker edited on the phone arrived 33 times)."""
+    (captured: a marker edited on the phone arrived 33 times).
+
+    kind: marker | route | shape | rab | other. lat/lon is the item's anchor
+    (marker position, route start, shape centre or first vertex, range line
+    start). points holds [lat, lon] pairs for routes and polygons; extra
+    holds kind-specific facts (radius_m, range_m, bearing_deg, end, ...)."""
     uid: str
     type: str
+    kind: str
     name: str | None
-    lat: float
-    lon: float
+    lat: float | None
+    lon: float | None
     remarks: str
-    from_uid: str
+    creator_uid: str
+    creator_callsign: str | None
+    points: list = field(default_factory=list)
+    extra: dict = field(default_factory=dict)
+    stale: datetime | None = None
 
 
 @dataclass
@@ -230,21 +250,153 @@ def classify(ev: Event, bot_uid: str):
             time=parse_time(remarks.get("time")) or ev.time,
         )
 
+    if ev.type == "t-x-d-d":
+        uid = sender_uid(ev)
+        return Disconnected(uid) if uid else Other(ev.type)
+
     contact = ev.find("contact")
-    if ev.type.startswith("a-") and ev.lat is not None and ev.lon is not None:
-        # ATAK can send trailing spaces ("AE5HO/TAK "); keep it trimmed.
-        callsign = ((contact.get("callsign") if contact is not None else None) or "").strip() or None
-        # A device reporting its own position names a stream endpoint on its
-        # <contact> (captured: "*:-1:stcp"). Markers and other map items do
-        # not (captured marker_first.xml), so they never become contacts.
-        if contact is not None and contact.get("endpoint"):
-            return Position(uid=ev.uid, callsign=callsign, lat=ev.lat, lon=ev.lon,
-                            time=ev.time)
-        remarks = ev.find("remarks")
-        return MapItem(uid=ev.uid, type=ev.type, name=callsign, lat=ev.lat, lon=ev.lon,
-                       remarks=(remarks.text or "") if remarks is not None else "",
-                       from_uid=sender_uid(ev) or "")
-    return Other(ev.type)
+    # A device reporting its own position names a stream endpoint on its
+    # <contact> (captured: "*:-1:stcp"). Markers and other map items do not
+    # (captured marker_first.xml), so they never become contacts.
+    if (ev.type.startswith("a-") and ev.lat is not None and ev.lon is not None
+            and contact is not None and contact.get("endpoint")):
+        track = ev.find("track")
+        return Position(uid=ev.uid, callsign=_callsign(contact), lat=ev.lat, lon=ev.lon,
+                        time=ev.time,
+                        speed_mps=_float(track.get("speed")) if track is not None else None,
+                        course_deg=_float(track.get("course")) if track is not None else None)
+    item = parse_map_item(ev)
+    return item if item is not None else Other(ev.type)
+
+
+def _callsign(contact: ET.Element | None) -> str | None:
+    # ATAK can send trailing spaces ("AE5HO/TAK "); keep it trimmed.
+    if contact is None:
+        return None
+    return (contact.get("callsign") or "").strip() or None
+
+
+def _value(ev: Event, tag: str) -> float | None:
+    el = ev.find(tag)
+    return _float(el.get("value")) if el is not None else None
+
+
+def _link_points(ev: Event) -> tuple[list, list]:
+    """Vertices from <link point="lat,lon[,hae]" relation="c"> children,
+    in order (captured route), and the named waypoints among them."""
+    points, waypoints = [], []
+    if ev.detail is None:
+        return points, waypoints
+    for link in ev.detail.findall("link"):
+        p = link.get("point")
+        if not p or link.get("relation") not in ("c", None):
+            continue
+        parts = p.split(",")
+        la, lo = (_float(parts[0]), _float(parts[1])) if len(parts) >= 2 else (None, None)
+        if la is None or lo is None or not (-90 <= la <= 90 and -180 <= lo <= 180):
+            continue
+        points.append([la, lo])
+        name = (link.get("callsign") or "").strip()
+        if name:
+            wp = {"name": name, "lat": la, "lon": lo}
+            if link.get("remarks"):
+                wp["remarks"] = link.get("remarks")
+            waypoints.append(wp)
+    return points, waypoints
+
+
+def _destination(lat: float, lon: float, bearing_deg: float, dist_m: float) -> list:
+    """Great-circle end point from a start, true bearing and distance."""
+    import math
+    r = 6371008.8
+    p1, l1, b = math.radians(lat), math.radians(lon), math.radians(bearing_deg)
+    d = dist_m / r
+    p2 = math.asin(math.sin(p1) * math.cos(d) + math.cos(p1) * math.sin(d) * math.cos(b))
+    l2 = l1 + math.atan2(math.sin(b) * math.sin(d) * math.cos(p1),
+                         math.cos(d) - math.sin(p1) * math.sin(p2))
+    return [round(math.degrees(p2), 7), round((math.degrees(l2) + 540) % 360 - 180, 7)]
+
+
+def parse_map_item(ev: Event) -> MapItem | None:
+    """A shared map item, from the shapes captured on 2026-11-17:
+
+    * a-... without a contact endpoint: marker (marker_first.xml)
+    * b-m-r: route; points in <link point relation="c"> (route.xml)
+    * u-rb-a: range and bearing; <range value> m, <bearing value> deg
+      (range_bearing.xml)
+    * u-d-c-c: circle; <shape><ellipse major minor> m (circle.xml)
+    * other u-d-...: drawn shapes; vertices read like a route's links
+    * b-m-p-...: map points (waypoints, spot markers)
+    """
+    t = ev.type
+    if t.startswith("a-"):
+        kind = "marker"
+    elif t == "b-m-r":
+        kind = "route"
+    elif t == "u-rb-a":
+        kind = "rab"
+    elif t.startswith("u-d-"):
+        kind = "shape"
+    elif t.startswith("b-m-p-"):
+        kind = "marker"
+    else:
+        return None
+
+    creator = ev.find("creator")
+    remarks = ev.find("remarks")
+    item = MapItem(
+        uid=ev.uid, type=t, kind=kind, name=_callsign(ev.find("contact")),
+        lat=ev.lat, lon=ev.lon,
+        remarks=(remarks.text or "").strip() if remarks is not None else "",
+        creator_uid=(creator.get("uid") if creator is not None else None) or sender_uid(ev) or "",
+        creator_callsign=(creator.get("callsign") or "").strip() or None
+        if creator is not None else None,
+        stale=ev.stale,
+    )
+
+    if kind == "route":
+        points, waypoints = _link_points(ev)
+        item.points = points
+        if points:
+            item.lat, item.lon = points[0]
+        item.extra["waypoints"] = waypoints
+        attr = ev.find("link_attr")
+        if attr is not None:
+            for k in ("method", "direction", "routetype", "type"):
+                if attr.get(k):
+                    item.extra[k] = attr.get(k)
+    elif kind == "rab":
+        rng, brg = _value(ev, "range"), _value(ev, "bearing")
+        if rng is not None:
+            item.extra["range_m"] = round(rng, 1)
+        if brg is not None:
+            item.extra["bearing_deg"] = round(brg, 2)
+        north = ev.find("northRef")
+        if north is not None:
+            item.extra["north_ref"] = north.get("value")
+        if None not in (rng, brg, item.lat, item.lon):
+            item.extra["end"] = _destination(item.lat, item.lon, brg, rng)
+    elif kind == "shape":
+        ellipse = ev.find("shape/ellipse")
+        if ellipse is not None:
+            major, minor = _float(ellipse.get("major")), _float(ellipse.get("minor"))
+            if major is not None and minor is not None and abs(major - minor) < 0.01:
+                item.extra["radius_m"] = round(major, 1)
+            else:
+                item.extra.update({"major_m": major, "minor_m": minor,
+                                   "angle_deg": _float(ellipse.get("angle"))})
+            item.extra["shape"] = "circle" if "radius_m" in item.extra else "ellipse"
+        else:
+            points, _ = _link_points(ev)
+            item.points = points
+            if points and (item.lat is None or item.lon is None):
+                item.lat, item.lon = points[0]
+            # Captured: u-d-r rectangle (four corner links, no relation).
+            item.extra["shape"] = {"u-d-r": "rectangle", "u-d-f": "freehand"}.get(t, "polygon")
+            closed = ev.find("shape/polyline") if ev.detail is not None else None
+            if closed is not None and closed.get("closed"):
+                item.extra["closed"] = closed.get("closed") == "true"
+    return item
 
 
 def parse_groklink(raw_json: str, max_bytes: int, max_items: int) -> dict:

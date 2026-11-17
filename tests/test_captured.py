@@ -33,10 +33,14 @@ def test_real_positions_parse(name, uid, type_):
     assert (what.lat, what.lon) == (35.0, -90.0)
 
 
-@pytest.mark.parametrize("name", ["server_protocol_offer.xml", "server_t-x-d-d.xml",
-                                  "server_t-x-g-c.xml"])
+@pytest.mark.parametrize("name", ["server_protocol_offer.xml", "server_t-x-g-c.xml"])
 def test_server_control_messages_are_ignored(name):
     assert isinstance(cot.classify(cot.parse_event(cap(name)), BOT), cot.Other)
+
+
+def test_server_disconnect_notice():
+    what = cot.classify(cot.parse_event(cap("server_t-x-d-d.xml")), BOT)
+    assert isinstance(what, cot.Disconnected) and what.uid == "takbridge-GROK-1"
 
 
 def test_callsign_with_slash_is_a_valid_recipient():
