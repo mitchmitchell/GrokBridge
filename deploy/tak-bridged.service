@@ -1,0 +1,45 @@
+[Unit]
+Description=tak-bridge: AI bots as TAK chat contacts
+Documentation=https://github.com/mitchmitchell/GrokBridge
+# The TAK Server and Tailscale should be up first; the bridge also retries
+# its connection with backoff, so ordering is a convenience, not a need.
+Wants=network-online.target
+After=network-online.target tailscaled.service takserver.service
+
+[Service]
+Type=simple
+User=takbridge
+Group=takbridge
+ExecStart=/opt/takbridge/venv/bin/tak-bridged /etc/takbridge/takbridge.ini
+Environment=TAKBRIDGE_LOG=INFO
+Environment=PYTHONWARNINGS=ignore
+Restart=on-failure
+RestartSec=10
+
+# /run/takbridge holds the control socket. 0750 + group takbridge lets the
+# takbot login and the admins (members of group takbridge) reach it; the
+# service also checks each caller's Unix identity (SO_PEERCRED).
+RuntimeDirectory=takbridge
+RuntimeDirectoryMode=0750
+StateDirectory=takbridge
+StateDirectoryMode=0750
+UMask=0007
+
+# Hardening: no privileges, read-only system, its own state dir only.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/takbridge
+
+[Install]
+WantedBy=multi-user.target
