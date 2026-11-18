@@ -51,6 +51,34 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--name", required=True)
     s.add_argument("--remarks", default="")
 
+    s = sub.add_parser("rab", help="range-and-bearing line for one person")
+    s.add_argument("--to", required=True)
+    s.add_argument("--lat")
+    s.add_argument("--lon")
+    s.add_argument("--from", dest="from_", help="start at this person's position instead of --lat/--lon")
+    s.add_argument("--bearing", required=True, help="degrees true, 0-360")
+    s.add_argument("--range", dest="range_", required=True, help="metres")
+    s.add_argument("--name", required=True)
+    s.add_argument("--remarks", default="")
+
+    s = sub.add_parser("circle", help="circular area for one person")
+    s.add_argument("--to", required=True)
+    s.add_argument("--lat")
+    s.add_argument("--lon")
+    s.add_argument("--from", dest="from_", help="centre on this person's position")
+    s.add_argument("--radius", required=True, help="metres")
+    s.add_argument("--name", required=True)
+    s.add_argument("--remarks", default="")
+
+    s = sub.add_parser("rectangle", help="rectangular area (two opposite corners)")
+    s.add_argument("--to", required=True)
+    s.add_argument("--lat", required=True)
+    s.add_argument("--lon", required=True)
+    s.add_argument("--lat2", required=True)
+    s.add_argument("--lon2", required=True)
+    s.add_argument("--name", required=True)
+    s.add_argument("--remarks", default="")
+
     s = sub.add_parser("where", help="last known position")
     s.add_argument("callsign")
 
@@ -92,6 +120,22 @@ def args_to_request(ns: argparse.Namespace) -> tuple[str, dict]:
         a = {"to": ns.to, "text": " ".join(ns.text)}
     elif cmd == "mark":
         a = {"to": ns.to, "lat": ns.lat, "lon": ns.lon, "name": ns.name, "remarks": ns.remarks}
+    elif cmd == "rab":
+        a = {"to": ns.to, "bearing": ns.bearing, "range": ns.range_, "name": ns.name,
+             "remarks": ns.remarks}
+        if ns.from_:
+            a["from"] = ns.from_
+        else:
+            a["lat"], a["lon"] = ns.lat, ns.lon
+    elif cmd == "circle":
+        a = {"to": ns.to, "radius": ns.radius, "name": ns.name, "remarks": ns.remarks}
+        if ns.from_:
+            a["from"] = ns.from_
+        else:
+            a["lat"], a["lon"] = ns.lat, ns.lon
+    elif cmd == "rectangle":
+        a = {"to": ns.to, "lat": ns.lat, "lon": ns.lon, "lat2": ns.lat2, "lon2": ns.lon2,
+             "name": ns.name, "remarks": ns.remarks}
     elif cmd == "where":
         a = {"callsign": ns.callsign}
     elif cmd == "map":

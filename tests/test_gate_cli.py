@@ -136,3 +136,8 @@ def test_authorizer_allows_self_and_refuses_strangers():
     assert allowed(os.getuid())
     assert not allowed(None)
     assert not allowed(4_000_000)  # no such user
+
+
+@pytest.mark.parametrize("cmd", ["rab", "circle", "rectangle"])
+def test_gate_allows_new_map_commands(cmd):
+    assert sshgate.parse(f"tak {cmd}") == [cmd]

@@ -516,3 +516,104 @@ def build_presence(*, bot_uid: str, callsign: str, lat: float, lon: float,
     ET.SubElement(detail, "__group", {"name": group, "role": role})
     ET.SubElement(detail, "uid", {"Droid": callsign})
     return _bytes(ev)
+
+
+def _creator_link(detail: ET.Element, bot_uid: str, bot_callsign: str, now: datetime) -> None:
+    """The <creator> and p-p <link> that captured drawn items carry."""
+    t = cot_time(now)
+    ET.SubElement(detail, "creator", {"uid": bot_uid, "callsign": bot_callsign,
+                                      "time": t, "type": "a-f-G-U-C"})
+    ET.SubElement(detail, "link", {"uid": bot_uid, "production_time": t, "type": "a-f-G-U-C",
+                                   "parent_callsign": bot_callsign, "relation": "p-p"})
+
+
+def build_rab(*, bot_uid: str, bot_callsign: str, to_callsign: str, uid: str,
+              lat: float, lon: float, bearing_deg: float, range_m: float,
+              name: str, remarks: str, now: datetime, stale_s: int = 86400) -> bytes:
+    """A range-and-bearing line from (lat, lon), shaped like the captured
+    u-rb-a (tests/fixtures/captured/range_bearing.xml). ATAK draws the line
+    from the point out to the given bearing and range. <marti> sends it to
+    the one recipient."""
+    ev, detail = _event(uid, "u-rb-a", "h-e", lat, lon, now,
+                        now + timedelta(seconds=stale_s))
+    ET.SubElement(detail, "contact", {"callsign": name})
+    ET.SubElement(detail, "range", {"value": f"{range_m}"})
+    ET.SubElement(detail, "bearing", {"value": f"{bearing_deg}"})
+    ET.SubElement(detail, "inclination", {"value": "0"})
+    ET.SubElement(detail, "rangeUnits", {"value": "1"})     # metres
+    ET.SubElement(detail, "bearingUnits", {"value": "0"})   # degrees
+    ET.SubElement(detail, "northRef", {"value": "1"})       # true north
+    r = ET.SubElement(detail, "remarks")
+    r.text = remarks
+    _creator_link(detail, bot_uid, bot_callsign, now)
+    ET.SubElement(detail, "color", {"value": "-65536"})
+    ET.SubElement(detail, "archive")
+    ET.SubElement(detail, "labels_on", {"value": "true"})
+    ET.SubElement(detail, "strokeColor", {"value": "-65536"})
+    ET.SubElement(detail, "strokeWeight", {"value": "3.0"})
+    ET.SubElement(detail, "strokeStyle", {"value": "solid"})
+    _marti(detail, to_callsign)
+    return _bytes(ev)
+
+
+def build_circle(*, bot_uid: str, bot_callsign: str, to_callsign: str, uid: str,
+                 lat: float, lon: float, radius_m: float, name: str, remarks: str,
+                 now: datetime, stale_s: int = 86400) -> bytes:
+    """A circle centred on (lat, lon), shaped like the captured u-d-c-c
+    (tests/fixtures/captured/circle.xml)."""
+    ev, detail = _event(uid, "u-d-c-c", "h-e", lat, lon, now,
+                        now + timedelta(seconds=stale_s))
+    ET.SubElement(detail, "contact", {"callsign": name})
+    shape = ET.SubElement(detail, "shape")
+    ET.SubElement(shape, "ellipse", {"major": f"{radius_m}", "minor": f"{radius_m}",
+                                     "angle": "360"})
+    style_link = ET.SubElement(shape, "link", {"uid": f"{uid}.Style",
+                                               "type": "b-x-KmlStyle", "relation": "p-c"})
+    style = ET.SubElement(style_link, "Style")
+    line = ET.SubElement(style, "LineStyle")
+    ET.SubElement(line, "color").text = "ffffffff"
+    ET.SubElement(line, "width").text = "3.0"
+    poly = ET.SubElement(style, "PolyStyle")
+    ET.SubElement(poly, "color").text = "96ffffff"
+    ET.SubElement(detail, "__shapeExtras", {"cpvis": "true", "editable": "true"})
+    r = ET.SubElement(detail, "remarks")
+    r.text = remarks
+    _creator_link(detail, bot_uid, bot_callsign, now)
+    ET.SubElement(detail, "archive")
+    ET.SubElement(detail, "labels_on", {"value": "true"})
+    ET.SubElement(detail, "strokeColor", {"value": "-1"})
+    ET.SubElement(detail, "strokeWeight", {"value": "3.0"})
+    ET.SubElement(detail, "strokeStyle", {"value": "solid"})
+    ET.SubElement(detail, "fillColor", {"value": "-1761607681"})
+    _marti(detail, to_callsign)
+    return _bytes(ev)
+
+
+def build_rectangle(*, bot_uid: str, bot_callsign: str, to_callsign: str, uid: str,
+                    corner1: tuple, corner2: tuple, name: str, remarks: str,
+                    now: datetime, stale_s: int = 86400) -> bytes:
+    """A rectangle from two opposite corners, shaped like the captured u-d-r
+    (tests/fixtures/captured/rectangle.xml): four corner <link point> children
+    and the centre as the event point."""
+    lat1, lon1 = corner1
+    lat2, lon2 = corner2
+    clat, clon = (lat1 + lat2) / 2, (lon1 + lon2) / 2
+    corners = [(lat1, lon1), (lat1, lon2), (lat2, lon2), (lat2, lon1)]
+    ev, detail = _event(uid, "u-d-r", "h-e", clat, clon, now,
+                        now + timedelta(seconds=stale_s))
+    ET.SubElement(detail, "contact", {"callsign": name})
+    for la, lo in corners:
+        ET.SubElement(detail, "link", {"point": f"{la:.7f},{lo:.7f}"})
+    ET.SubElement(detail, "__shapeExtras", {"cpvis": "true", "editable": "true"})
+    r = ET.SubElement(detail, "remarks")
+    r.text = remarks
+    _creator_link(detail, bot_uid, bot_callsign, now)
+    ET.SubElement(detail, "archive")
+    ET.SubElement(detail, "tog", {"enabled": "0"})
+    ET.SubElement(detail, "labels_on", {"value": "false"})
+    ET.SubElement(detail, "strokeColor", {"value": "-1"})
+    ET.SubElement(detail, "strokeWeight", {"value": "3.0"})
+    ET.SubElement(detail, "strokeStyle", {"value": "solid"})
+    ET.SubElement(detail, "fillColor", {"value": "-1761607681"})
+    _marti(detail, to_callsign)
+    return _bytes(ev)

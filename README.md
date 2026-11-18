@@ -82,6 +82,9 @@ ok = hmac.compare_digest(
 
 A failed call is retried three times; the message stays unread in the inbox
 either way. `tools/webhook_receiver.py` is a working example receiver.
+`deploy/helper-skill.md` is a ready-to-use instruction set for the bot's own
+agent: how to read vs. create map items, every command with JSON examples,
+and worked examples.
 
 ## The tak commands
 
@@ -95,7 +98,10 @@ the quoting of the bot's own shell, while stdin passes text untouched:
 | --- | --- |
 | `inbox [--peek]` | Unread messages; marks them read unless `--peek` |
 | `say --to CALLSIGN TEXT` | Direct chat to that person only |
-| `mark --to CALLSIGN --lat N --lon N --name TEXT [--remarks TEXT]` | Marker on that person's map only |
+| `mark --to CALLSIGN --lat N --lon N --name TEXT [--remarks TEXT]` | Point marker on that person's map only |
+| `rab --to CALLSIGN (--lat N --lon N \| --from CALLSIGN) --bearing DEG --range M --name TEXT` | Range-and-bearing line |
+| `circle --to CALLSIGN (--lat N --lon N \| --from CALLSIGN) --radius M --name TEXT` | Circular area |
+| `rectangle --to CALLSIGN --lat N --lon N --lat2 N --lon2 N --name TEXT` | Rectangular area (two corners) |
 | `where CALLSIGN` | Last position, speed, heading, age, stale, online |
 | `contacts` | Callsigns seen, last seen, online |
 | `status` | This bot's connection |

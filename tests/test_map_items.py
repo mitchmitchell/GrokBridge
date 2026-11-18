@@ -164,3 +164,68 @@ def test_self_disconnect_notice_triggers_reconnect():
     b.handle_event("GROK-1", ddnotice("ANDROID-tablet"))
     assert calls == ["GROK-1"]  # unchanged
     assert b.call("GROK-1", "where", {"callsign": "TEST1/TAK"})["online"] is False
+
+
+def _mk_bridge():
+    store = Store(":memory:")
+    sent = []
+    b = Bridge(make_config(), store, send=lambda bot, d: sent.append(d) or True,
+               connected=lambda b: True)
+    b.handle_event("GROK-1", cap("position_atak_tablet.xml"))  # TEST1/TAK seen
+    return b, sent
+
+
+def test_rab_builds_sends_and_parses_back():
+    from takbridge import cot
+    b, sent = _mk_bridge()
+    r = b.call("GROK-1", "rab", {"to": "TEST1/TAK", "lat": 35.0, "lon": -90.0,
+                                 "bearing": 30, "range": 1000, "name": "Bearing A"})
+    assert r["ok"], r
+    ev = cot.parse_event(sent[-1])
+    assert ev.type == "u-rb-a"
+    assert ev.find("range").get("value") == "1000.0" or ev.find("range").get("value") == "1000"
+    assert ev.find("bearing").get("value").startswith("30")
+    assert ev.find("marti/dest").get("callsign") == "TEST1/TAK"
+    what = cot.classify(ev, "takbridge-GROK-1")
+    assert what.kind == "rab" and what.extra["range_m"] == 1000.0
+
+
+def test_rab_from_a_persons_position():
+    b, sent = _mk_bridge()
+    r = b.call("GROK-1", "rab", {"to": "TEST1/TAK", "from": "TEST1/TAK",
+                                 "bearing": 90, "range": 500, "name": "B"})
+    assert r["ok"], r  # start taken from TEST1/TAK's last position
+
+
+def test_circle_builds_and_parses_back():
+    from takbridge import cot
+    b, sent = _mk_bridge()
+    r = b.call("GROK-1", "circle", {"to": "TEST1/TAK", "lat": 35.0, "lon": -90.0,
+                                    "radius": 300, "name": "Area 1"})
+    assert r["ok"], r
+    ev = cot.parse_event(sent[-1])
+    assert ev.type == "u-d-c-c"
+    what = cot.classify(ev, "takbridge-GROK-1")
+    assert what.kind == "shape" and what.extra["shape"] == "circle" and what.extra["radius_m"] == 300.0
+    assert ev.find("marti/dest").get("callsign") == "TEST1/TAK"
+
+
+def test_rectangle_builds_with_four_corners():
+    from takbridge import cot
+    b, sent = _mk_bridge()
+    r = b.call("GROK-1", "rectangle", {"to": "TEST1/TAK", "lat": 35.0, "lon": -90.0,
+                                       "lat2": 35.01, "lon2": -89.99, "name": "Box"})
+    assert r["ok"], r
+    ev = cot.parse_event(sent[-1])
+    assert ev.type == "u-d-r"
+    assert len([l for l in ev.detail.findall("link") if l.get("point")]) == 4
+    assert cot.classify(ev, "takbridge-GROK-1").extra["shape"] == "rectangle"
+
+
+def test_shape_validation_and_bad_point():
+    b, _ = _mk_bridge()
+    assert not b.call("GROK-1", "rab", {"to": "TEST1/TAK", "lat": 35, "lon": -90,
+                                        "bearing": 999, "range": 100, "name": "x"})["ok"]
+    assert not b.call("GROK-1", "circle", {"to": "TEST1/TAK", "radius": 100, "name": "x"})["ok"]
+    assert not b.call("GROK-1", "rab", {"to": "NOBODY", "lat": 35, "lon": -90,
+                                        "bearing": 10, "range": 100, "name": "x"})["ok"]

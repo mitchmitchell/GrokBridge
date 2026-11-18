@@ -24,8 +24,8 @@ from .store import Store
 
 log = logging.getLogger("takbridge.core")
 
-TOOLS = ("inbox", "say", "mark", "where", "contacts", "status", "map", "mapitem",
-         "sitrep", "items", "item")
+TOOLS = ("inbox", "say", "mark", "rab", "circle", "rectangle", "where", "contacts",
+         "status", "map", "mapitem", "sitrep", "items", "item")
 ITEM_KINDS = ("marker", "contact", "route", "shape", "rab", "bloodhound", "track", "other")
 MAP_KINDS = ("marker", "route", "shape", "rab")
 
@@ -223,7 +223,7 @@ class Bridge:
         text, marker names or coordinates."""
         if not isinstance(args, dict):
             return ""
-        who = args.get("to") if tool in ("say", "mark") else (
+        who = args.get("to") if tool in ("say", "mark", "rab", "circle", "rectangle") else (
             args.get("callsign") if tool == "where" else None)
         return f" ({str(who)[:40]})" if isinstance(who, str) and who else ""
 
@@ -250,6 +250,19 @@ class Bridge:
         if c is None or c["uid"] in {b.uid for b in self.cfg.bots.values()}:
             raise ToolError(f"{cs} has not been seen on the TAK network")
         return c
+
+    def _point(self, args) -> tuple:
+        """A lat/lon from explicit --lat/--lon, or --from CALLSIGN (that
+        person's last known position). Lets a bot say 'from my position'."""
+        frm = args.get("from")
+        if frm:
+            c = self.store.contact_by_callsign(validate.callsign(frm, "from"))
+            if c is None or c.get("lat") is None:
+                raise ToolError(f"no position known for {frm}")
+            return c["lat"], c["lon"]
+        if args.get("lat") is not None and args.get("lon") is not None:
+            return validate.lat(args.get("lat")), validate.lon(args.get("lon"))
+        raise ToolError("give --lat and --lon, or --from CALLSIGN")
 
     def _rate_check(self, bot: str) -> None:
         if self.store.outbound_count(bot) >= self.cfg.limits.outbound_per_minute:
@@ -315,6 +328,64 @@ class Bridge:
         if not self.send(bot, data):
             raise ToolError("the TAK Server connection is down; not sent")
         self.store.log_outbound(bot, "mark", to["callsign"], uid)
+        return {"uid": uid}
+
+    def _t_rab(self, bot, args):
+        lim = self.cfg.limits
+        lat, lon = self._point(args)
+        bearing = validate.coord(args.get("bearing"), "bearing", 0, 360)
+        rng = validate.radius(args.get("range"))
+        name = validate.text(args.get("name"), "name", lim.name_chars)
+        remarks = validate.text(args.get("remarks"), "remarks", lim.remarks_chars,
+                                required=False)
+        to = self._recipient(args.get("to"))
+        self._rate_check(bot)
+        b = self.cfg.bot(bot)
+        uid = f"takbridge-{b.callsign}-{uuid.uuid4()}"
+        data = cot.build_rab(bot_uid=b.uid, bot_callsign=b.callsign, to_callsign=to["callsign"],
+                             uid=uid, lat=lat, lon=lon, bearing_deg=bearing, range_m=rng,
+                             name=name, remarks=remarks, now=self._now())
+        if not self.send(bot, data):
+            raise ToolError("the TAK Server connection is down; not sent")
+        self.store.log_outbound(bot, "rab", to["callsign"], uid)
+        return {"uid": uid}
+
+    def _t_circle(self, bot, args):
+        lim = self.cfg.limits
+        lat, lon = self._point(args)
+        radius = validate.radius(args.get("radius"))
+        name = validate.text(args.get("name"), "name", lim.name_chars)
+        remarks = validate.text(args.get("remarks"), "remarks", lim.remarks_chars,
+                                required=False)
+        to = self._recipient(args.get("to"))
+        self._rate_check(bot)
+        b = self.cfg.bot(bot)
+        uid = f"takbridge-{b.callsign}-{uuid.uuid4()}"
+        data = cot.build_circle(bot_uid=b.uid, bot_callsign=b.callsign,
+                                to_callsign=to["callsign"], uid=uid, lat=lat, lon=lon,
+                                radius_m=radius, name=name, remarks=remarks, now=self._now())
+        if not self.send(bot, data):
+            raise ToolError("the TAK Server connection is down; not sent")
+        self.store.log_outbound(bot, "circle", to["callsign"], uid)
+        return {"uid": uid}
+
+    def _t_rectangle(self, bot, args):
+        lim = self.cfg.limits
+        c1 = (validate.lat(args.get("lat")), validate.lon(args.get("lon")))
+        c2 = (validate.lat(args.get("lat2")), validate.lon(args.get("lon2")))
+        name = validate.text(args.get("name"), "name", lim.name_chars)
+        remarks = validate.text(args.get("remarks"), "remarks", lim.remarks_chars,
+                                required=False)
+        to = self._recipient(args.get("to"))
+        self._rate_check(bot)
+        b = self.cfg.bot(bot)
+        uid = f"takbridge-{b.callsign}-{uuid.uuid4()}"
+        data = cot.build_rectangle(bot_uid=b.uid, bot_callsign=b.callsign,
+                                   to_callsign=to["callsign"], uid=uid, corner1=c1, corner2=c2,
+                                   name=name, remarks=remarks, now=self._now())
+        if not self.send(bot, data):
+            raise ToolError("the TAK Server connection is down; not sent")
+        self.store.log_outbound(bot, "rectangle", to["callsign"], uid)
         return {"uid": uid}
 
     def _t_where(self, bot, args):
