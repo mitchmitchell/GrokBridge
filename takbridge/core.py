@@ -42,14 +42,18 @@ class Bridge:
     def __init__(self, config: Config, store: Store,
                  send: Callable[[str, bytes], bool],
                  connected: Callable[[str], bool],
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time,
+                 reconnect: Callable[[str], None] = lambda bot: None):
         """send(bot, event_bytes) queues an event on that bot's connection and
-        returns False if it cannot; connected(bot) reports the link state."""
+        returns False if it cannot; connected(bot) reports the link state;
+        reconnect(bot) asks that bot's link to drop and start a fresh TAK
+        session (used when TAK resets our groups)."""
         self.cfg = config
         self.store = store
         self.send = send
         self.connected = connected
         self.clock = clock
+        self.reconnect = reconnect
         self.counters: dict[str, int] = {}
 
     def _count(self, what: str) -> None:
@@ -76,6 +80,18 @@ class Bridge:
             self._count("position")
             return []
         if isinstance(what, cot.Disconnected):
+            if what.uid == b.uid:
+                # TAK told us THIS bot was disconnected. The server sends this
+                # when it resets our groups, and it may leave the TCP socket
+                # half-open: 'connected' still reads true and our sends still
+                # leave the socket, but the server no longer routes them (the
+                # replies that silently stopped arriving). Trust the notice,
+                # not the socket: drop and reconnect to get fresh groups.
+                log.warning("bot %s: TAK sent a disconnect/group-reset notice for "
+                            "this bot; reconnecting for a fresh session", bot)
+                self._count("self_disconnect")
+                self.reconnect(bot)
+                return []
             self.store.mark_disconnected(what.uid)
             c = self.store.contact_by_uid(what.uid)
             log.info("bot %s: %s disconnected from the TAK Server", bot,

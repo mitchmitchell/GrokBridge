@@ -31,6 +31,10 @@ READ_CHUNK = 65536
 MAX_BUFFER = 1024 * 1024  # larger than any accepted event (256 KB requests)
 FATAL_RETRY_S = 60
 SUMMARY_S = 15 * 60  # activity summary in the log every 15 minutes
+# Force a fresh session if nothing at all arrives for this long. TAK clients
+# in our groups beacon every ~30 s and the server pings, so a long silence
+# means the session is dead even though the socket looks open.
+RX_IDLE_LIMIT_S = 300
 
 
 class BotLink:
@@ -41,6 +45,8 @@ class BotLink:
         self.bot = bot
         self.queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=200)
         self.connected = False
+        self.force_reconnect = asyncio.Event()
+        self.last_rx = 0.0
 
     def send(self, data: bytes) -> bool:
         if not self.connected:
@@ -50,6 +56,11 @@ class BotLink:
             return True
         except asyncio.QueueFull:
             return False
+
+    def request_reconnect(self) -> None:
+        """Ask the current session to drop so run() makes a fresh one. Called
+        when TAK sends a disconnect/group-reset notice for this bot."""
+        self.force_reconnect.set()
 
     async def run(self) -> None:
         section = self.svc.cfg.pytak_section(self.bot)
@@ -67,12 +78,15 @@ class BotLink:
         reader, writer = await pytak.protocol_factory(self.svc.cfg.pytak_section(self.bot))
         log.info("bot %s: connected to %s", self.bot.callsign, self.svc.cfg.cot_url)
         self.connected = True
+        self.force_reconnect.clear()
+        self.last_rx = asyncio.get_running_loop().time()
         while not self.queue.empty():  # drop anything queued while down
             self.queue.get_nowait()
         tasks = [
             asyncio.create_task(self._reader(reader)),
             asyncio.create_task(self._writer(writer)),
             asyncio.create_task(self._presence()),
+            asyncio.create_task(self._watchdog()),
         ]
         try:
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
@@ -93,6 +107,7 @@ class BotLink:
             chunk = await reader.read(READ_CHUNK)
             if not chunk:
                 raise ConnectionResetError("server closed the connection")
+            self.last_rx = asyncio.get_running_loop().time()
             buf += chunk
             events, buf = cot.split_stream(buf)
             if len(buf) > MAX_BUFFER:
@@ -108,6 +123,21 @@ class BotLink:
             data = await self.queue.get()
             writer.write(data)
             await writer.drain()
+
+    async def _watchdog(self) -> None:
+        """End the session (so run() reconnects) when TAK asks us to via a
+        disconnect/group-reset notice, or when nothing has arrived for too
+        long (a half-open or de-routed session the socket hides)."""
+        loop = asyncio.get_running_loop()
+        while True:
+            try:
+                await asyncio.wait_for(self.force_reconnect.wait(), timeout=30)
+                raise ConnectionResetError("reconnect requested (TAK disconnect/group notice)")
+            except asyncio.TimeoutError:
+                pass
+            if loop.time() - self.last_rx > RX_IDLE_LIMIT_S:
+                raise ConnectionResetError(
+                    f"no data received for {RX_IDLE_LIMIT_S}s; assuming a dead session")
 
     async def _presence(self) -> None:
         cfg = self.svc.cfg
@@ -127,7 +157,8 @@ class Service:
         self.links = {cs: BotLink(self, b) for cs, b in cfg.bots.items()}
         self.bridge = Bridge(cfg, self.store,
                              send=lambda bot, data: self.links[bot].send(data),
-                             connected=lambda bot: self.links[bot].connected)
+                             connected=lambda bot: self.links[bot].connected,
+                             reconnect=lambda bot: self.links[bot].request_reconnect())
         self._webhooks: set[asyncio.Task] = set()
 
     def fire_webhook(self, bot: Bot, body: dict) -> None:

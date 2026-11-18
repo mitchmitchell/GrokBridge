@@ -140,3 +140,27 @@ def test_store_migrates_an_old_contacts_table(tmp_path):
     s = Store(str(db))
     cols = {r["name"] for r in s.db.execute("PRAGMA table_info(contacts)")}
     assert {"speed_mps", "course_deg", "disconnected_at", "pos_seen"} <= cols
+
+
+def test_self_disconnect_notice_triggers_reconnect():
+    cfg = make_config()
+    store = Store(":memory:")
+    calls = []
+    b = Bridge(cfg, store, send=lambda *a: True, connected=lambda b: True,
+               reconnect=lambda bot: calls.append(bot))
+
+    def ddnotice(link_uid):
+        return (f"<event version='2.0' uid='x' type='t-x-d-d' how='h-g-i-g-o' "
+                f"time='2026-11-18T05:00:00Z' start='2026-11-18T05:00:00Z' "
+                f"stale='2026-11-18T05:00:20Z'><point lat='0' lon='0' hae='0' ce='9' le='9'/>"
+                f"<detail><link relation='p-p' uid='{link_uid}' type='a-f-G-U-C'/></detail></event>"
+                ).encode()
+
+    # a notice for THIS bot's own uid -> reconnect
+    b.handle_event("GROK-1", ddnotice("takbridge-GROK-1"))
+    assert calls == ["GROK-1"] and b.counters.get("self_disconnect") == 1
+    # a notice for someone else -> mark offline, no reconnect
+    b.handle_event("GROK-1", cap("position_atak_tablet.xml"))
+    b.handle_event("GROK-1", ddnotice("ANDROID-tablet"))
+    assert calls == ["GROK-1"]  # unchanged
+    assert b.call("GROK-1", "where", {"callsign": "TEST1/TAK"})["online"] is False
